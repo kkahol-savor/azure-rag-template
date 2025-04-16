@@ -237,7 +237,7 @@ class SearchManager:
         filter: Optional[str] = None,
         select: Optional[List[str]] = None,
         semantic_search: bool = True,
-        query_type: QueryType = QueryType.SEMANTIC
+        semantic_configuration_name: str = "basic"
     ) -> List[Dict[str, Any]]:
         """
         Search the index with the given query.
@@ -248,10 +248,10 @@ class SearchManager:
             filter: OData filter expression
             select: List of fields to return
             semantic_search: Whether to use semantic search
-            query_type: Type of query to use
+            semantic_configuration_name: Name of the semantic configuration to use
             
         Returns:
-            List of search results
+            List of search results ordered by semantic score
         """
         # Initialize search client if not already done
         if not self.search_client:
@@ -265,9 +265,9 @@ class SearchManager:
         search_options = {}
         
         if semantic_search:
-            search_options["query_type"] = query_type
+            search_options["query_type"] = QueryType.SEMANTIC
             search_options["query_language"] = "en-us"
-            search_options["semantic_configuration_name"] = "default"
+            search_options["semantic_configuration_name"] = semantic_configuration_name
         
         # Perform the search
         top = top or TOP_N_DOCUMENTS

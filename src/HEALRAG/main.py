@@ -225,15 +225,23 @@ class HEALRAG:
             semantic_search: Whether to use semantic search
             
         Returns:
-            List of search results
+            List of search results ordered by semantic score
         """
-        return self.search_manager.search(
+        # Get search results with semantic configuration
+        results = self.search_manager.search(
             query=query,
             top=top,
             filter=filter,
             select=select,
-            semantic_search=semantic_search
+            semantic_search=semantic_search,
+            semantic_configuration_name="basic"  # Use the basic semantic configuration
         )
+        
+        # Sort results by semantic score in descending order
+        if semantic_search and results:
+            results.sort(key=lambda x: x.get('@search.score', 0), reverse=True)
+        
+        return results
     
     def generate_response(self, query: str, context: List[Dict[str, Any]], 
                          stream: bool = True) -> Union[str, Generator[str, None, None]]:
