@@ -112,10 +112,11 @@ class HEALRAG:
             - details: List of upload details for each file
         """
         # First, list all existing blobs in the container
-        existing_blobs = set(self.blob_manager.list_blobs())  # list_blobs() already returns blob names
+        existing_blobs = set(self.blob_manager.list_blobs())
         
         # Get list of files to upload
         files_to_upload = []
+        skipped_files = []
         for root, _, files in os.walk(directory_path):
             if not recursive and root != directory_path:
                 continue
@@ -126,26 +127,51 @@ class HEALRAG:
                 
                 if blob_name in existing_blobs and not FILE_OVERWRITE:
                     print(f"Skipping {blob_name} - already exists in blob storage")
-                    continue
-                    
-                files_to_upload.append((file_path, blob_name))
+                    skipped_files.append(blob_name)
+                else:
+                    files_to_upload.append((file_path, blob_name))
         
         if not files_to_upload:
             print("No new documents to upload - all files already exist in blob storage")
             return {
-                "total_files": len(existing_blobs),
-                "uploaded_files": 0,
-                "skipped_files": len(existing_blobs),
-                "failed_files": 0,
+                "total": len(existing_blobs),
+                "uploaded": 0,
+                "skipped": len(existing_blobs),
+                "failed": 0,
+                "details": []
+            }
+        
+        # Upload new files
+        if FILE_OVERWRITE:
+            print("FILE_OVERWRITE is True - uploading all files")
+            results = self.blob_manager.upload_directory(directory_path, recursive)
+        else:
+            # Only upload files that don't exist
+            results = {
+                "total": len(files_to_upload) + len(skipped_files),
+                "uploaded": 0,
+                "skipped": len(skipped_files),
+                "failed": 0,
                 "details": []
             }
             
-        # Upload new files
-        results = self.blob_manager.upload_directory(directory_path, recursive)
-        
-        # Add information about skipped files
-        results["skipped_files"] = len(existing_blobs) if not FILE_OVERWRITE else 0
-        results["total_files"] = len(existing_blobs) + len(files_to_upload)
+            for file_path, blob_name in files_to_upload:
+                try:
+                    self.blob_manager.upload_file(file_path, blob_name)
+                    results["uploaded"] += 1
+                    results["details"].append({
+                        "file": file_path,
+                        "blob": blob_name,
+                        "status": "uploaded"
+                    })
+                except Exception as e:
+                    results["failed"] += 1
+                    results["details"].append({
+                        "file": file_path,
+                        "blob": blob_name,
+                        "status": "failed",
+                        "error": str(e)
+                    })
         
         return results
     

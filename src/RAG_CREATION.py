@@ -75,21 +75,50 @@ class RAGCreation:
     
     def _extract_json_files(self, data_dir: str = "data") -> List[Dict[str, Any]]:
         """
-        Extract JSON files from the data directory.
+        Extract JSON files from the data directory and match them with corresponding PDF files.
         
         Args:
             data_dir: Path to the directory containing JSON files
             
         Returns:
-            List of extracted JSON data
+            List of extracted JSON data with PDF file information
         """
         json_files = []
         
+        # First, collect all PDF files
+        pdf_files = {}
         for file in os.listdir(data_dir):
-            if file.endswith(".json"):
-                with open(os.path.join(data_dir, file), "r") as f:
+            if file.endswith(".pdf"):
+                # Extract the plan number and type from the filename (e.g., "SOB_4911.pdf" -> "4911", "SOB")
+                file_type, plan_number = file.split("_")
+                plan_number = plan_number.split(".")[0]
+                if plan_number not in pdf_files:
+                    pdf_files[plan_number] = {}
+                pdf_files[plan_number][file_type] = os.path.join(data_dir, file)
+        
+        # Process each PDF file
+        for plan_number, files in pdf_files.items():
+            # Find the corresponding JSON file
+            json_file = f"SBC_{plan_number}.json"
+            json_path = os.path.join(data_dir, json_file)
+            
+            if not os.path.exists(json_path):
+                print(f"Warning: JSON file {json_file} not found for plan {plan_number}")
+                continue
+                
+            try:
+                with open(json_path, "r") as f:
                     json_data = json.load(f)
-                    json_files.append(json_data)
+                    
+                    # Add PDF file information to JSON data
+                    json_data["pdf_files"] = files
+                    
+                    # Only add if the JSON data has valid content
+                    if json_data.get("qa_data") or json_data.get("medical_events_data"):
+                        json_files.append(json_data)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Error reading JSON file {json_file}: {str(e)}")
+                continue
         
         return json_files
     
@@ -106,6 +135,9 @@ class RAGCreation:
             {"name": "parent_id", "type": "Edm.String", "searchable": True, "filterable": True},
             {"name": "plan_name", "type": "Edm.String", "searchable": True, "filterable": True},
             {"name": "state", "type": "Edm.String", "searchable": True, "filterable": True},
+            {"name": "plan_number", "type": "Edm.String", "searchable": True, "filterable": True},
+            {"name": "file_type", "type": "Edm.String", "searchable": True, "filterable": True},
+            {"name": "file_path", "type": "Edm.String", "searchable": True, "filterable": True},
             # Collection fields cannot be sortable
             {"name": "excluded_services", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
             {"name": "other_covered_services", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
@@ -178,6 +210,7 @@ class RAGCreation:
     def _prepare_documents_for_indexing(self, json_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Prepare documents for indexing by extracting and structuring data.
+        Creates one document per plan number with all data from both SOB and SBC files.
         
         Args:
             json_data: List of JSON data from files
@@ -191,147 +224,64 @@ class RAGCreation:
             # Extract basic fields
             plan_name = data.get("plan_name", "")
             state = data.get("state", "")
+            plan_number = data.get("plan_number", "")
             
             # Create URL-safe plan name by replacing spaces with double dashes and removing special characters
             safe_plan_name = plan_name.replace(" ", "--")
             # Remove apostrophes and other special characters
             safe_plan_name = ''.join(c for c in safe_plan_name if c.isalnum() or c == '-')
             
-            # Process Q&A data
-            qa_questions = []
-            qa_answers = []
-            qa_why_this_matters = []
+            # Create a single document for the plan
+            chunk_id = f"{safe_plan_name}--{state}--{plan_number}"
             
+            # Combine all content for search
+            content_parts = []
+            
+            # Add Q&A content
             for qa in data.get("qa_data", []):
-                qa_questions.append(qa.get("question", ""))
-                qa_answers.append(qa.get("answer", ""))
-                qa_why_this_matters.append(qa.get("why_this_matters", ""))
+                content_parts.append(f"Q: {qa.get('question', '')}")
+                content_parts.append(f"A: {qa.get('answer', '')}")
+                content_parts.append(f"Why This Matters: {qa.get('why_this_matters', '')}")
             
-            # Process medical events data
-            medical_events = []
-            medical_services = []
-            medical_costs = []
-            medical_limitations = []
-            
+            # Add medical events content
             for event in data.get("medical_events_data", []):
-                medical_events.append(event.get("common_medical_event", ""))
-                medical_services.append(event.get("services_you_may_need", ""))
-                medical_costs.append(event.get("what_you_will_pay", ""))
-                medical_limitations.append(event.get("limitations_exceptions", ""))
+                content_parts.append(f"Medical Event: {event.get('common_medical_event', '')}")
+                content_parts.append(f"Service: {event.get('services_you_may_need', '')}")
+                content_parts.append(f"Cost: {event.get('what_you_will_pay', '')}")
+                content_parts.append(f"Limitations: {event.get('limitations_exceptions', '')}")
             
-            # Process excluded services
+            # Add excluded services
             excluded_services = self._parse_list_items(data.get("excluded_services", ""))
-            
-            # Process other covered services
-            other_covered_services = self._parse_list_items(data.get("other_covered_services", ""))
-            
-            # Create a document for each Q&A item
-            for i, (question, answer, why_matters) in enumerate(zip(qa_questions, qa_answers, qa_why_this_matters)):
-                # Create URL-safe chunk ID with double dashes
-                chunk_id = f"{safe_plan_name}--{state}--qa--{i}"
-                
-                # Combine content for search
-                content = f"Question: {question}\nAnswer: {answer}\nWhy This Matters: {why_matters}"
-                
-                document = {
-                    "chunk_id": chunk_id,
-                    "content": content,
-                    "parent_id": plan_name,
-                    "plan_name": plan_name,
-                    "state": state,
-                    "qa_questions": [question],
-                    "qa_answers": [answer],
-                    "qa_why_this_matters": [why_matters],
-                    "medical_events": medical_events,
-                    "medical_services": medical_services,
-                    "medical_costs": medical_costs,
-                    "medical_limitations": medical_limitations,
-                    "excluded_services": excluded_services,
-                    "other_covered_services": other_covered_services
-                }
-                
-                documents.append(document)
-            
-            # Create a document for medical events
-            for i, (event, service, cost, limitation) in enumerate(zip(medical_events, medical_services, medical_costs, medical_limitations)):
-                # Create URL-safe chunk ID with double dashes
-                chunk_id = f"{safe_plan_name}--{state}--medical--{i}"
-                
-                # Combine content for search
-                content = f"Medical Event: {event}\nService: {service}\nCost: {cost}\nLimitations: {limitation}"
-                
-                document = {
-                    "chunk_id": chunk_id,
-                    "content": content,
-                    "parent_id": plan_name,
-                    "plan_name": plan_name,
-                    "state": state,
-                    "qa_questions": qa_questions,
-                    "qa_answers": qa_answers,
-                    "qa_why_this_matters": qa_why_this_matters,
-                    "medical_events": [event],
-                    "medical_services": [service],
-                    "medical_costs": [cost],
-                    "medical_limitations": [limitation],
-                    "excluded_services": excluded_services,
-                    "other_covered_services": other_covered_services
-                }
-                
-                documents.append(document)
-            
-            # Create a document for excluded services
             if excluded_services:
-                # Create URL-safe chunk ID with double dashes
-                chunk_id = f"{safe_plan_name}--{state}--excluded"
-                
-                # Combine content for search
-                content = f"Excluded Services: {', '.join(excluded_services)}"
-                
-                document = {
-                    "chunk_id": chunk_id,
-                    "content": content,
-                    "parent_id": plan_name,
-                    "plan_name": plan_name,
-                    "state": state,
-                    "qa_questions": qa_questions,
-                    "qa_answers": qa_answers,
-                    "qa_why_this_matters": qa_why_this_matters,
-                    "medical_events": medical_events,
-                    "medical_services": medical_services,
-                    "medical_costs": medical_costs,
-                    "medical_limitations": medical_limitations,
-                    "excluded_services": excluded_services,
-                    "other_covered_services": other_covered_services
-                }
-                
-                documents.append(document)
+                content_parts.append(f"Excluded Services: {', '.join(excluded_services)}")
             
-            # Create a document for other covered services
+            # Add other covered services
+            other_covered_services = self._parse_list_items(data.get("other_covered_services", ""))
             if other_covered_services:
-                # Create URL-safe chunk ID with double dashes
-                chunk_id = f"{safe_plan_name}--{state}--covered"
-                
-                # Combine content for search
-                content = f"Other Covered Services: {', '.join(other_covered_services)}"
-                
-                document = {
-                    "chunk_id": chunk_id,
-                    "content": content,
-                    "parent_id": plan_name,
-                    "plan_name": plan_name,
-                    "state": state,
-                    "qa_questions": qa_questions,
-                    "qa_answers": qa_answers,
-                    "qa_why_this_matters": qa_why_this_matters,
-                    "medical_events": medical_events,
-                    "medical_services": medical_services,
-                    "medical_costs": medical_costs,
-                    "medical_limitations": medical_limitations,
-                    "excluded_services": excluded_services,
-                    "other_covered_services": other_covered_services
-                }
-                
-                documents.append(document)
+                content_parts.append(f"Other Covered Services: {', '.join(other_covered_services)}")
+            
+            # Create the document with all fields
+            document = {
+                "chunk_id": chunk_id,
+                "content": "\n".join(content_parts),
+                "parent_id": plan_name,
+                "plan_name": plan_name,
+                "state": state,
+                "plan_number": plan_number,
+                "file_type": "combined",  # Indicates this is a combined document
+                "file_path": data.get("pdf_files", {}).get("SBC", ""),  # Use SBC file path as primary
+                "qa_questions": [qa.get("question", "") for qa in data.get("qa_data", [])],
+                "qa_answers": [qa.get("answer", "") for qa in data.get("qa_data", [])],
+                "qa_why_this_matters": [qa.get("why_this_matters", "") for qa in data.get("qa_data", [])],
+                "medical_events": [event.get("common_medical_event", "") for event in data.get("medical_events_data", [])],
+                "medical_services": [event.get("services_you_may_need", "") for event in data.get("medical_events_data", [])],
+                "medical_costs": [event.get("what_you_will_pay", "") for event in data.get("medical_events_data", [])],
+                "medical_limitations": [event.get("limitations_exceptions", "") for event in data.get("medical_events_data", [])],
+                "excluded_services": excluded_services,
+                "other_covered_services": other_covered_services
+            }
+            
+            documents.append(document)
         
         return documents
     

@@ -68,6 +68,17 @@ class SearchManager:
         self.index_client = SearchIndexClient(endpoint=self.endpoint, credential=self.credential)
         self.search_client = None
     
+    def _initialize_search_client(self) -> None:
+        """
+        Initialize the search client if it hasn't been initialized yet.
+        """
+        if not self.search_client:
+            self.search_client = SearchClient(
+                endpoint=self.endpoint,
+                index_name=self.index_name,
+                credential=self.credential
+            )
+    
     def create_index(self, fields: List[Union[SimpleField, SearchableField, ComplexField]], 
                     scoring_profile: Optional[ScoringProfile] = None,
                     semantic_config: Optional[SemanticConfiguration] = None) -> SearchIndex:
@@ -169,66 +180,64 @@ class SearchManager:
         Returns:
             Dictionary with indexing results
         """
-        if not documents:
-            return {"success": False, "message": "No documents provided"}
-        
         # Initialize search client if not already done
         if not self.search_client:
-            self.search_client = SearchClient(
-                endpoint=self.endpoint,
-                index_name=self.index_name,
-                credential=self.credential
-            )
+            self._initialize_search_client()
         
-        results = {
-            "success": True,
-            "total": len(documents),
-            "indexed": 0,
-            "failed": 0,
-            "errors": []
-        }
+        # Create a progress log file
+        progress_file = "search_progress.ndjson"
+        with open(progress_file, "w") as f:
+            f.write("")  # Clear the file if it exists
         
-        # Upload documents in batches
-        for i in range(0, len(documents), batch_size):
+        total_documents = len(documents)
+        indexed_documents = 0
+        failed_documents = []
+        
+        # Process documents in batches
+        for i in range(0, total_documents, batch_size):
             batch = documents[i:i + batch_size]
             try:
+                # Upload batch
                 result = self.search_client.upload_documents(documents=batch)
-                success_count = sum(1 for r in result if r.succeeded)
-                results["indexed"] += success_count
-                results["failed"] += len(batch) - success_count
                 
-                # Record progress
-                self._record_progress({
-                    "operation": "populate_index",
-                    "index_name": self.index_name,
-                    "batch_start": i,
-                    "batch_size": len(batch),
-                    "success_count": success_count,
-                    "timestamp": datetime.now().isoformat(),
-                    "status": "success"
-                })
+                # Log successful documents
+                with open(progress_file, "a") as f:
+                    for doc in batch:
+                        f.write(json.dumps({
+                            "chunk_id": doc.get("chunk_id", "unknown"),
+                            "plan_name": doc.get("plan_name", "unknown"),
+                            "state": doc.get("state", "unknown"),
+                            "file_type": doc.get("file_type", "unknown"),
+                            "status": "success"
+                        }) + "\n")
                 
+                indexed_documents += len(batch)
                 print(f"Uploaded batch of {len(batch)} documents")
-                print(f"Successfully indexed {success_count} documents")
-                print(f"Failed to index {len(batch) - success_count} documents")
+                
             except Exception as e:
-                results["failed"] += len(batch)
-                results["errors"].append({"batch_start": i, "error": str(e)})
-                
-                # Record failure
-                self._record_progress({
-                    "operation": "populate_index",
-                    "index_name": self.index_name,
-                    "batch_start": i,
-                    "batch_size": len(batch),
-                    "timestamp": datetime.now().isoformat(),
-                    "status": "failed",
-                    "error": str(e)
-                })
-                
+                # Log failed documents
+                with open(progress_file, "a") as f:
+                    for doc in batch:
+                        f.write(json.dumps({
+                            "chunk_id": doc.get("chunk_id", "unknown"),
+                            "plan_name": doc.get("plan_name", "unknown"),
+                            "state": doc.get("state", "unknown"),
+                            "file_type": doc.get("file_type", "unknown"),
+                            "status": "failed",
+                            "error": str(e)
+                        }) + "\n")
+                failed_documents.extend(batch)
                 print(f"Failed to upload batch: {str(e)}")
         
-        return results
+        print(f"Successfully indexed {indexed_documents} documents")
+        print(f"Failed to index {len(failed_documents)} documents")
+        
+        return {
+            "total": total_documents,
+            "indexed": indexed_documents,
+            "failed": len(failed_documents),
+            "failed_details": failed_documents
+        }
     
     def search(
         self,
