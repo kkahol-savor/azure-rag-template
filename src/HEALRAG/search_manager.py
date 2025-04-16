@@ -237,7 +237,8 @@ class SearchManager:
         filter: Optional[str] = None,
         select: Optional[List[str]] = None,
         semantic_search: bool = True,
-        semantic_configuration_name: str = "basic"
+        semantic_configuration_name: str = "basic",
+        scoring_profile_name: str = "insurancePlansScoring"
     ) -> List[Dict[str, Any]]:
         """
         Search the index with the given query.
@@ -249,6 +250,7 @@ class SearchManager:
             select: List of fields to return
             semantic_search: Whether to use semantic search
             semantic_configuration_name: Name of the semantic configuration to use
+            scoring_profile_name: Name of the scoring profile to use
             
         Returns:
             List of search results ordered by semantic score
@@ -262,7 +264,9 @@ class SearchManager:
             )
         
         # Set up search options
-        search_options = {}
+        search_options = {
+            "scoring_profile": scoring_profile_name  # Use the insurance plans scoring profile
+        }
         
         if semantic_search:
             search_options["query_type"] = QueryType.SEMANTIC

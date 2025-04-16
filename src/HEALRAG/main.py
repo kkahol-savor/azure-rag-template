@@ -227,14 +227,15 @@ class HEALRAG:
         Returns:
             List of search results ordered by semantic score
         """
-        # Get search results with semantic configuration
+        # Get search results with semantic configuration and scoring profile
         results = self.search_manager.search(
             query=query,
             top=top,
             filter=filter,
             select=select,
             semantic_search=semantic_search,
-            semantic_configuration_name="basic"  # Use the basic semantic configuration
+            semantic_configuration_name="basic",
+            scoring_profile_name="insurancePlansScoring"
         )
         
         # Sort results by semantic score in descending order
