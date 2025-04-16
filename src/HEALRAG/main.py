@@ -10,6 +10,11 @@ import json
 import sys
 from typing import List, Dict, Any, Optional, Union, Generator
 from datetime import datetime
+from azure.search.documents.indexes.models import SearchField, ScoringProfile, TextWeights, SemanticConfiguration
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add the src directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,6 +23,9 @@ from src.HEALRAG.blob_manager import BlobManager
 from src.HEALRAG.search_manager import SearchManager
 from src.HEALRAG.rag_manager import RAGManager
 from src.HEALRAG.db_manager import DBManager
+
+# Get FILE_OVERWRITE from environment variables, default to False
+FILE_OVERWRITE = os.getenv("FILE_OVERWRITE", "False").lower() == "true"
 
 class HEALRAG:
     """
@@ -89,32 +97,106 @@ class HEALRAG:
     
     def upload_documents(self, directory_path: str, recursive: bool = True) -> Dict[str, Any]:
         """
-        Upload documents to blob storage.
+        Upload documents to blob storage, skipping existing files unless FILE_OVERWRITE is True.
         
         Args:
             directory_path: Path to the directory containing documents
             recursive: Whether to upload subdirectories recursively
             
         Returns:
-            Dictionary with upload results
+            Dictionary with upload results including:
+            - total_files: Total number of files found
+            - uploaded_files: Number of files uploaded
+            - skipped_files: Number of files skipped (already exist)
+            - failed_files: Number of files that failed to upload
+            - details: List of upload details for each file
         """
-        return self.blob_manager.upload_directory(directory_path, recursive)
+        # First, list all existing blobs in the container
+        existing_blobs = set(self.blob_manager.list_blobs())  # list_blobs() already returns blob names
+        
+        # Get list of files to upload
+        files_to_upload = []
+        for root, _, files in os.walk(directory_path):
+            if not recursive and root != directory_path:
+                continue
+            for file in files:
+                file_path = os.path.join(root, file)
+                # Create blob name by removing the directory_path prefix
+                blob_name = os.path.relpath(file_path, directory_path)
+                
+                if blob_name in existing_blobs and not FILE_OVERWRITE:
+                    print(f"Skipping {blob_name} - already exists in blob storage")
+                    continue
+                    
+                files_to_upload.append((file_path, blob_name))
+        
+        if not files_to_upload:
+            print("No new documents to upload - all files already exist in blob storage")
+            return {
+                "total_files": len(existing_blobs),
+                "uploaded_files": 0,
+                "skipped_files": len(existing_blobs),
+                "failed_files": 0,
+                "details": []
+            }
+            
+        # Upload new files
+        results = self.blob_manager.upload_directory(directory_path, recursive)
+        
+        # Add information about skipped files
+        results["skipped_files"] = len(existing_blobs) if not FILE_OVERWRITE else 0
+        results["total_files"] = len(existing_blobs) + len(files_to_upload)
+        
+        return results
     
-    def create_search_index(self, fields: List[Any], 
-                          scoring_profile: Optional[Any] = None,
-                          semantic_config: Optional[Any] = None) -> Any:
+    def create_search_index(
+        self,
+        fields: List[Dict[str, Any]],
+        scoring_profile: Optional[Dict[str, Any]] = None,
+        semantic_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
-        Create a search index with the specified schema.
+        Create a search index with the specified fields and configurations.
         
         Args:
-            fields: List of fields to include in the index
-            scoring_profile: Optional scoring profile for custom ranking
-            semantic_config: Optional semantic configuration for semantic search
+            fields: List of field definitions
+            scoring_profile: Optional scoring profile configuration
+            semantic_config: Optional semantic configuration
             
         Returns:
-            Created SearchIndex
+            Dict containing the created index information
         """
-        return self.search_manager.create_index(fields, scoring_profile, semantic_config)
+        # Convert dictionary fields to SearchField objects
+        search_fields = []
+        for field in fields:
+            search_field = SearchField(
+                name=field["name"],
+                type=field["type"],
+                key=field.get("key", False),
+                searchable=field.get("searchable", True),
+                filterable=field.get("filterable", True),
+                sortable=field.get("sortable", True),
+                facetable=field.get("facetable", False)
+            )
+            search_fields.append(search_field)
+        
+        # Convert scoring profile if provided
+        scoring_profile_obj = None
+        if scoring_profile:
+            scoring_profile_obj = ScoringProfile(
+                name=scoring_profile["name"],
+                text_weights=TextWeights(weights=scoring_profile["text"]["weights"])
+            )
+        
+        # Convert semantic config if provided
+        semantic_config_obj = None
+        if semantic_config:
+            semantic_config_obj = SemanticConfiguration(
+                name=semantic_config["name"],
+                prioritized_fields=semantic_config["prioritizedFields"]
+            )
+            
+        return self.search_manager.create_index(search_fields, scoring_profile_obj, semantic_config_obj)
     
     def populate_search_index(self, documents: List[Dict[str, Any]], batch_size: int = 1000) -> Dict[str, Any]:
         """

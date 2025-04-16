@@ -14,8 +14,8 @@ body {
 
 /* Header Styles */
 header {
-    background-color: #2c3e50;
-    color: white;
+    background: linear-gradient(to right, #ffffff, #ffa64d);
+    color: #333;
     text-align: center;
     padding: 2rem 0;
     position: relative;
@@ -36,11 +36,13 @@ header {
 header h1 {
     font-size: 2.5rem;
     margin-bottom: 0.5rem;
+    color: #333;
 }
 
 header p {
     font-size: 1.2rem;
     opacity: 0.8;
+    color: #333;
 }
 
 /* Main Content Styles */
@@ -54,16 +56,20 @@ main {
     display: flex;
     gap: 1rem;
     position: relative;
+    height: calc(100vh - 250px);
 }
 
 .chat-container {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 /* Query Section Styles */
 .query-section {
-    margin-bottom: 2rem;
+    margin-top: auto;
+    padding: 1rem 0;
 }
 
 .input-container {
@@ -94,6 +100,27 @@ main {
     background-color: #2980b9;
 }
 
+.icon-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    border-radius: 4px;
+    transition: background-color 0.3s;
+}
+
+.icon-btn:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.btn-icon {
+    height: 24px;
+    width: auto;
+}
+
 .secondary-btn {
     padding: 0.5rem 1rem;
     background-color: #95a5a6;
@@ -115,7 +142,9 @@ main {
     padding: 1.5rem;
     border-radius: 4px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    min-height: 200px;
+    flex: 1;
+    overflow-y: auto;
+    margin-bottom: 1rem;
 }
 
 #response-text {
@@ -136,6 +165,7 @@ main {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     overflow: hidden;
     transition: width 0.3s ease;
+    order: -1; /* Move to the left */
 }
 
 .history-panel.collapsed {
@@ -154,14 +184,6 @@ main {
 .history-header h3 {
     margin: 0;
     font-size: 1.1rem;
-}
-
-.icon-btn {
-    background: none;
-    border: none;
-    color: white;
-    font-size: 1.2rem;
-    cursor: pointer;
 }
 
 .history-list {

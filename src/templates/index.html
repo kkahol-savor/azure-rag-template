@@ -17,26 +17,28 @@
 
     <main>
         <div class="main-container">
-            <div class="chat-container">
-                <section class="query-section">
-                    <div class="input-container">
-                        <input type="text" id="query-input" placeholder="Ask about your insurance plan...">
-                        <button id="submit-btn">Submit</button>
-                    </div>
-                    <button id="clear-session-btn" class="secondary-btn">Clear Session</button>
-                </section>
-
-                <section class="response-section">
-                    <div id="response-text"></div>
-                </section>
-            </div>
-            
             <div class="history-panel">
                 <div class="history-header">
                     <h3>Conversation History</h3>
                     <button id="toggle-history-btn" class="icon-btn">☰</button>
                 </div>
                 <div id="history-list" class="history-list"></div>
+            </div>
+            
+            <div class="chat-container">
+                <section class="response-section">
+                    <div id="response-text"></div>
+                </section>
+                
+                <section class="query-section">
+                    <div class="input-container">
+                        <input type="text" id="query-input" placeholder="Ask about your insurance plan...">
+                        <button id="submit-btn">Submit</button>
+                        <button id="clear-session-btn" class="icon-btn" title="New Session">
+                            <img src="{{ url_for('static', path='images/new_session.png') }}" alt="New Session" class="btn-icon">
+                        </button>
+                    </div>
+                </section>
             </div>
         </div>
     </main>
@@ -47,7 +49,7 @@
     </div>
 
     <footer>
-        <p>Powered by HEALRAG - Azure RAG Template</p>
+        <p>Powered by HealRag: Point32 Library for Medical RAGS</p>
     </footer>
 
     <script src="{{ url_for('static', path='script.js') }}"></script>

@@ -82,25 +82,20 @@ class SearchManager:
         Returns:
             Created SearchIndex
         """
-        # Ensure required fields are present
-        has_id_field = any(field.name == "id" and field.key for field in fields)
-        if not has_id_field:
-            fields.insert(0, SimpleField(name="id", type=SearchFieldDataType.String, key=True))
-        
-        # Create semantic settings if semantic config is provided
-        semantic_settings = None
-        if semantic_config:
-            # In newer versions of the SDK, semantic settings are handled differently
-            # We'll just pass the semantic_config directly
-            semantic_settings = semantic_config
-        
-        # Create the index
+        # Create the index with basic configuration
         index = SearchIndex(
             name=self.index_name,
-            fields=fields,
-            scoring_profiles=[scoring_profile] if scoring_profile else None,
-            semantic_settings=semantic_settings
+            fields=fields
         )
+        
+        # Add scoring profile if provided
+        if scoring_profile:
+            index.scoring_profiles = [scoring_profile]
+        
+        # Add semantic configuration if provided
+        if semantic_config:
+            # In newer versions of the SDK, semantic settings are handled through the semantic_config
+            index.semantic_settings = semantic_config
         
         try:
             result = self.index_client.create_or_update_index(index)

@@ -101,20 +101,21 @@ class RAGCreation:
             List of field definitions
         """
         fields = [
-            {"name": "chunk_id", "type": "Edm.String", "key": True},
+            {"name": "chunk_id", "type": "Edm.String", "key": True},  # Only this field should be key
             {"name": "content", "type": "Edm.String", "searchable": True},
             {"name": "parent_id", "type": "Edm.String", "searchable": True, "filterable": True},
             {"name": "plan_name", "type": "Edm.String", "searchable": True, "filterable": True},
             {"name": "state", "type": "Edm.String", "searchable": True, "filterable": True},
-            {"name": "excluded_services", "type": "Collection(Edm.String)", "searchable": True},
-            {"name": "other_covered_services", "type": "Collection(Edm.String)", "searchable": True},
-            {"name": "qa_questions", "type": "Collection(Edm.String)", "searchable": True},
-            {"name": "qa_answers", "type": "Collection(Edm.String)", "searchable": True},
-            {"name": "qa_why_this_matters", "type": "Collection(Edm.String)", "searchable": True},
-            {"name": "medical_events", "type": "Collection(Edm.String)", "searchable": True},
-            {"name": "medical_services", "type": "Collection(Edm.String)", "searchable": True},
-            {"name": "medical_costs", "type": "Collection(Edm.String)", "searchable": True},
-            {"name": "medical_limitations", "type": "Collection(Edm.String)", "searchable": True}
+            # Collection fields cannot be sortable
+            {"name": "excluded_services", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
+            {"name": "other_covered_services", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
+            {"name": "qa_questions", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
+            {"name": "qa_answers", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
+            {"name": "qa_why_this_matters", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
+            {"name": "medical_events", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
+            {"name": "medical_services", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
+            {"name": "medical_costs", "type": "Collection(Edm.String)", "searchable": True, "sortable": False},
+            {"name": "medical_limitations", "type": "Collection(Edm.String)", "searchable": True, "sortable": False}
         ]
         
         return fields
@@ -191,6 +192,11 @@ class RAGCreation:
             plan_name = data.get("plan_name", "")
             state = data.get("state", "")
             
+            # Create URL-safe plan name by replacing spaces with double dashes and removing special characters
+            safe_plan_name = plan_name.replace(" ", "--")
+            # Remove apostrophes and other special characters
+            safe_plan_name = ''.join(c for c in safe_plan_name if c.isalnum() or c == '-')
+            
             # Process Q&A data
             qa_questions = []
             qa_answers = []
@@ -221,7 +227,8 @@ class RAGCreation:
             
             # Create a document for each Q&A item
             for i, (question, answer, why_matters) in enumerate(zip(qa_questions, qa_answers, qa_why_this_matters)):
-                chunk_id = f"{plan_name}_{state}_{i}"
+                # Create URL-safe chunk ID with double dashes
+                chunk_id = f"{safe_plan_name}--{state}--qa--{i}"
                 
                 # Combine content for search
                 content = f"Question: {question}\nAnswer: {answer}\nWhy This Matters: {why_matters}"
@@ -247,7 +254,8 @@ class RAGCreation:
             
             # Create a document for medical events
             for i, (event, service, cost, limitation) in enumerate(zip(medical_events, medical_services, medical_costs, medical_limitations)):
-                chunk_id = f"{plan_name}_{state}_medical_{i}"
+                # Create URL-safe chunk ID with double dashes
+                chunk_id = f"{safe_plan_name}--{state}--medical--{i}"
                 
                 # Combine content for search
                 content = f"Medical Event: {event}\nService: {service}\nCost: {cost}\nLimitations: {limitation}"
@@ -273,7 +281,8 @@ class RAGCreation:
             
             # Create a document for excluded services
             if excluded_services:
-                chunk_id = f"{plan_name}_{state}_excluded"
+                # Create URL-safe chunk ID with double dashes
+                chunk_id = f"{safe_plan_name}--{state}--excluded"
                 
                 # Combine content for search
                 content = f"Excluded Services: {', '.join(excluded_services)}"
@@ -299,7 +308,8 @@ class RAGCreation:
             
             # Create a document for other covered services
             if other_covered_services:
-                chunk_id = f"{plan_name}_{state}_covered"
+                # Create URL-safe chunk ID with double dashes
+                chunk_id = f"{safe_plan_name}--{state}--covered"
                 
                 # Combine content for search
                 content = f"Other Covered Services: {', '.join(other_covered_services)}"
