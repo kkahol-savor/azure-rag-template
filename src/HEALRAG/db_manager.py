@@ -21,6 +21,7 @@ COSMOS_ENDPOINT = os.getenv("COSMOS_ENDPOINT")
 COSMOS_KEY = os.getenv("COSMOS_KEY")
 COSMOS_DATABASE = os.getenv("COSMOS_DATABASE", "insurance-db")
 COSMOS_CONTAINER = os.getenv("COSMOS_CONTAINER", "conversations")
+COSMOS_PARTITION_KEY = os.getenv("COSMOS_PARTITION_KEY", "/user_id")
 PROGRESS_FILE = os.getenv("DB_PROGRESS_FILE", "db_progress.ndjson")
 
 class DBManager:
@@ -82,9 +83,9 @@ class DBManager:
         except CosmosHttpResponseError:
             self.container = self.database.create_container(
                 id=self.container_name,
-                partition_key=PartitionKey(path="/id")
+                partition_key=PartitionKey(path=COSMOS_PARTITION_KEY)
             )
-            print(f"Container '{self.container_name}' created successfully")
+            print(f"Container '{self.container_name}' created successfully with partition key '{COSMOS_PARTITION_KEY}'")
     
     def list_databases(self) -> List[str]:
         """
@@ -179,29 +180,31 @@ class DBManager:
         containers = self.database.list_containers()
         return [container["id"] for container in containers]
     
-    def create_container(self, container_name: str, partition_key_path: str = "/id") -> Any:
+    def create_container(self, container_name: str, partition_key_path: Optional[str] = None) -> Any:
         """
         Create a new container.
         
         Args:
             container_name: Name of the container to create
-            partition_key_path: Path for the partition key
+            partition_key_path: Path for the partition key (defaults to the one in environment)
             
         Returns:
             Created container client
         """
         try:
+            partition_key = partition_key_path or COSMOS_PARTITION_KEY
             container = self.database.create_container(
                 id=container_name,
-                partition_key=PartitionKey(path=partition_key_path)
+                partition_key=PartitionKey(path=partition_key)
             )
-            print(f"Container '{container_name}' created successfully")
+            print(f"Container '{container_name}' created successfully with partition key '{partition_key}'")
             
             # Record progress
             self._record_progress({
                 "operation": "create_container",
                 "database_name": self.database_name,
                 "container_name": container_name,
+                "partition_key": partition_key,
                 "timestamp": datetime.now().isoformat(),
                 "status": "success"
             })
@@ -213,6 +216,7 @@ class DBManager:
                 "operation": "create_container",
                 "database_name": self.database_name,
                 "container_name": container_name,
+                "partition_key": partition_key_path or COSMOS_PARTITION_KEY,
                 "timestamp": datetime.now().isoformat(),
                 "status": "failed",
                 "error": str(e)

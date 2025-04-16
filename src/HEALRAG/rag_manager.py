@@ -7,7 +7,7 @@ with Retrieval-Augmented Generation (RAG) capabilities.
 
 import os
 import json
-from typing import List, Dict, Any, Optional, Generator, Tuple
+from typing import List, Dict, Any, Optional, Generator, Tuple, Union
 from datetime import datetime
 from openai import AzureOpenAI
 from dotenv import load_dotenv

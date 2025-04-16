@@ -7,13 +7,17 @@ tying together the blob_manager, search_manager, rag_manager, and db_manager mod
 
 import os
 import json
+import sys
 from typing import List, Dict, Any, Optional, Union, Generator
 from datetime import datetime
 
-from HEALRAG.blob_manager import BlobManager
-from HEALRAG.search_manager import SearchManager
-from HEALRAG.rag_manager import RAGManager
-from HEALRAG.db_manager import DBManager
+# Add the src directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.HEALRAG.blob_manager import BlobManager
+from src.HEALRAG.search_manager import SearchManager
+from src.HEALRAG.rag_manager import RAGManager
+from src.HEALRAG.db_manager import DBManager
 
 class HEALRAG:
     """

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HEALRAG - Insurance Plan Assistant</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>HEALRAG</h1>
+        <p>Insurance Plan Assistant powered by Azure RAG</p>
+    </header>
+
+    <main>
+        <section class="query-section">
+            <form id="query-form">
+                <div class="input-group">
+                    <input type="text" id="query-input" placeholder="Ask about insurance plans..." required>
+                    <button type="submit" id="submit-btn">Submit</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="response-section">
+            <div class="response-container">
+                <div id="response-text"></div>
+            </div>
+        </section>
+
+        <div id="citation-panel" class="citation-panel">
+            <div class="citation-header">
+                <h3>Citation Details</h3>
+                <button id="close-citation-btn">&times;</button>
+            </div>
+            <div id="citation-content"></div>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2024 HEALRAG. All rights reserved.</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html> 

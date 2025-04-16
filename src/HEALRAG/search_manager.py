@@ -19,16 +19,10 @@ from azure.search.documents.indexes.models import (
     SearchFieldDataType,
     ScoringProfile,
     TextWeights,
-    SemanticConfiguration,
-    SemanticSettings,
-    SemanticField
+    SemanticConfiguration
 )
 from azure.search.documents import SearchClient
-from azure.search.documents.models import (
-    VectorSearchOptions,
-    SemanticSearchOptions,
-    QueryType
-)
+from azure.search.documents.models import QueryType
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -96,9 +90,9 @@ class SearchManager:
         # Create semantic settings if semantic config is provided
         semantic_settings = None
         if semantic_config:
-            semantic_settings = SemanticSettings(
-                configurations=[semantic_config]
-            )
+            # In newer versions of the SDK, semantic settings are handled differently
+            # We'll just pass the semantic_config directly
+            semantic_settings = semantic_config
         
         # Create the index
         index = SearchIndex(
@@ -145,12 +139,13 @@ class SearchManager:
         Returns:
             SemanticConfiguration
         """
+        # In newer versions of the SDK, the structure is different
         return SemanticConfiguration(
             name="default",
-            prioritized_fields=SemanticField(
-                content_fields=content_fields,
-                keywords_fields=keywords_fields or []
-            )
+            prioritized_fields={
+                "contentFields": [{"fieldName": field} for field in content_fields],
+                "keywordsFields": [{"fieldName": field} for field in (keywords_fields or [])]
+            }
         )
     
     def create_default_scoring_profile(self, field_weights: Dict[str, float]) -> ScoringProfile:
@@ -275,12 +270,9 @@ class SearchManager:
         search_options = {}
         
         if semantic_search:
-            semantic_options = SemanticSearchOptions(
-                query_type=query_type,
-                query_caption="extractive",
-                query_answer="extractive"
-            )
-            search_options["semantic_search_options"] = semantic_options
+            search_options["query_type"] = query_type
+            search_options["query_language"] = "en-us"
+            search_options["semantic_configuration_name"] = "default"
         
         # Perform the search
         top = top or TOP_N_DOCUMENTS

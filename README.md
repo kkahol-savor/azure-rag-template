@@ -1,18 +1,23 @@
-# HEALRAG: Azure RAG Template
+# Point32 Insurance RAG Assistant
 
-HEALRAG is a Python library for enabling Retrieval-Augmented Generation (RAG) creation using Azure services. It provides a comprehensive set of tools for managing document storage, search operations, and RAG-based response generation.
+An intelligent insurance plan assistant built using the HEALRAG library. This project provides a complete solution for insurance document retrieval and question answering using Azure services.
+
+## Overview
+
+This project leverages the HEALRAG library to create a specialized RAG (Retrieval-Augmented Generation) system for insurance plans. It allows users to ask questions about their insurance coverage, benefits, and policies, and receive accurate responses based on the actual insurance documents.
 
 ## Features
 
-- **Blob Storage Management**: Upload and manage documents in Azure Blob Storage
-- **Search Operations**: Create and manage Azure Cognitive Search indices with semantic search capabilities
-- **RAG Implementation**: Generate context-aware responses using Azure OpenAI
-- **Database Management**: Store and retrieve conversations using Cosmos DB
-- **Progress Tracking**: Monitor operations using NDJSON files
-- **Type Hints**: Full type support for better IDE integration
+- **Insurance Document Management**: Upload and manage insurance documents in Azure Blob Storage
+- **Semantic Search**: Find relevant insurance information using Azure Cognitive Search
+- **Intelligent Responses**: Generate accurate answers to insurance-related questions using Azure OpenAI
+- **Conversation History**: Store and retrieve user conversations using Cosmos DB
+- **Progress Tracking**: Monitor operations using NDJSON format
+- **Type Hints**: Full type support for better code completion and error detection
 - **Error Handling**: Comprehensive error handling and logging
-- **Batch Processing**: Efficient batch processing for large datasets
+- **Batch Processing**: Support for batch operations on insurance documents
 - **Streaming Support**: Stream responses for real-time interactions
+- **Web Interface**: User-friendly web application for interacting with the system
 
 ## Installation
 
@@ -33,41 +38,65 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Copy the environment template and fill in your Azure credentials:
-```bash
-cp src/HEALRAG/.env.template .env
-```
-
-## Configuration
-
-Create a `.env` file with your Azure credentials:
+4. Configure Azure credentials:
+Create a `.env` file in the root directory with the following variables:
 
 ```env
 # Azure Blob Storage Configuration
-AZURE_STORAGE_CONNECTION_STRING=your_blob_storage_connection_string
-AZURE_STORAGE_CONTAINER=insurance-documents
+AZURE_STORAGE_CONNECTION_STRING=your_connection_string
 BLOB_PROGRESS_FILE=blob_progress.ndjson
 
 # Azure Cognitive Search Configuration
-AZURE_SEARCH_ENDPOINT=https://your-search-service.search.windows.net
-AZURE_SEARCH_KEY=your_search_service_key
+AZURE_SEARCH_ENDPOINT=your_search_endpoint
+AZURE_SEARCH_KEY=your_search_key
 AZURE_SEARCH_INDEX_NAME=insurance-plans
 TOP_N_DOCUMENTS=5
 SEARCH_PROGRESS_FILE=search_progress.ndjson
 
 # Azure OpenAI Configuration
-AZURE_OPENAI_ENDPOINT=https://your-openai-service.openai.azure.com
-AZURE_OPENAI_KEY=your_openai_service_key
-AZURE_OPENAI_DEPLOYMENT=gpt-4
+AZURE_OPENAI_ENDPOINT=your_openai_endpoint
+AZURE_OPENAI_KEY=your_openai_key
+AZURE_OPENAI_DEPLOYMENT=your_deployment_name
 MAX_HISTORY=10
 RAG_PROGRESS_FILE=rag_progress.ndjson
 
 # Cosmos DB Configuration
-COSMOS_ENDPOINT=https://your-cosmos-account.documents.azure.com:443
-COSMOS_KEY=your_cosmos_db_key
+COSMOS_ENDPOINT=your_cosmos_endpoint
+COSMOS_KEY=your_cosmos_key
 COSMOS_DATABASE=insurance-db
 COSMOS_CONTAINER=conversations
+COSMOS_PARTITION_KEY=/user_id
 DB_PROGRESS_FILE=db_progress.ndjson
+
+# File specific configuration
+TOP_N_DOCUMENTS=5
+
+# RAG Pipeline Configuration
+DATA_DIR=data
+SETUP_PIPELINE=false
+STREAM_RESPONSES=true
+```
+
+## Project Structure
+
+```
+azure-rag-template/
+├── src/
+│   ├── HEALRAG/              # Core RAG library
+│   │   ├── __init__.py
+│   │   ├── blob_manager.py   # Azure Blob Storage operations
+│   │   ├── search_manager.py # Azure Cognitive Search operations
+│   │   ├── rag_manager.py    # RAG operations with Azure OpenAI
+│   │   ├── db_manager.py     # Cosmos DB operations
+│   │   └── main.py           # High-level interface
+│   ├── templates/
+│   │   └── index.html        # Web interface template
+│   ├── app.py                # Flask web application
+│   └── RAG_CREATION.py       # Insurance-specific RAG implementation
+├── data/                     # Sample insurance documents
+├── requirements.txt
+├── run_app.py                # Application entry point
+└── .env                      # Configuration file
 ```
 
 ## Usage
@@ -75,96 +104,96 @@ DB_PROGRESS_FILE=db_progress.ndjson
 ### Basic Usage
 
 ```python
-from HEALRAG.main import HEALRAG
+from src.HEALRAG.main import HEALRAG
 
 # Initialize HEALRAG
 healrag = HEALRAG()
 
-# Upload documents
-healrag.upload_documents("path/to/documents")
+# Upload insurance documents
+healrag.upload_documents("path/to/insurance_documents")
 
-# Create search index
-fields = [
-    {"name": "id", "type": "Edm.String", "key": True},
-    {"name": "content", "type": "Edm.String", "searchable": True}
-]
-healrag.create_search_index(fields)
+# Create and populate search index
+healrag.create_search_index()
+healrag.populate_search_index()
 
-# Populate search index
-healrag.populate_search_index(documents)
-
-# Process a query
-result = healrag.process_query("What is covered under the plan?")
-print(result["response"])
+# Process an insurance-related query
+response = healrag.process_query("What are the benefits of my insurance plan?")
+print(response)
 ```
 
 ### Advanced Usage
 
-#### Custom Search Configuration
-
 ```python
-# Create semantic configuration
-semantic_config = healrag.search_manager.create_default_semantic_config(
-    content_fields=["content"],
-    keywords_fields=["title"]
+from src.HEALRAG.main import HEALRAG
+
+# Initialize with custom configuration
+healrag = HEALRAG(
+    blob_connection_string="your_connection_string",
+    search_endpoint="your_search_endpoint",
+    search_key="your_search_key",
+    search_index_name="insurance-plans",
+    openai_endpoint="your_openai_endpoint",
+    openai_key="your_openai_key",
+    openai_deployment="your_deployment",
+    cosmos_endpoint="your_cosmos_endpoint",
+    cosmos_key="your_cosmos_key",
+    cosmos_database="insurance-db",
+    cosmos_container="conversations"
 )
 
-# Create scoring profile
-scoring_profile = healrag.search_manager.create_default_scoring_profile({
-    "title": 2.0,
-    "content": 1.0
-})
+# Upload insurance documents with progress tracking
+healrag.upload_documents(
+    "path/to/insurance_documents",
+    container_name="insurance-documents",
+    progress_file="insurance_upload_progress.ndjson"
+)
 
-# Create index with custom configuration
+# Create search index with insurance-specific fields
 healrag.create_search_index(
-    fields=fields,
-    scoring_profile=scoring_profile,
-    semantic_config=semantic_config
+    index_name="insurance-plans",
+    fields=[
+        {"name": "content", "type": "searchable", "facetable": False},
+        {"name": "plan_type", "type": "searchable", "facetable": True},
+        {"name": "coverage_details", "type": "searchable", "facetable": True},
+        {"name": "benefits", "type": "searchable", "facetable": True}
+    ]
 )
-```
 
-#### Streaming Responses
-
-```python
-# Generate streaming response
-for chunk in healrag.generate_response("What is covered?", context, stream=True):
+# Process insurance query with streaming
+for chunk in healrag.process_query(
+    "What are the benefits of my insurance plan?",
+    stream=True,
+    user_id="user123"
+):
     print(chunk, end="", flush=True)
 ```
 
-#### Conversation Management
+### Web Interface
 
-```python
-# Save conversation
-conversation = {
-    "query": "What is covered?",
-    "response": "Based on the plan...",
-    "timestamp": "2024-03-21T10:00:00Z"
-}
-saved = healrag.save_conversation(conversation)
+Run the web application:
 
-# Retrieve conversation
-retrieved = healrag.get_conversation(saved["id"])
+```bash
+python run_app.py
 ```
 
-## Project Structure
+This will start a Flask server with a web interface for interacting with the insurance RAG system.
 
-```
-HEALRAG/
-├── __init__.py
-├── blob_manager.py      # Azure Blob Storage operations
-├── search_manager.py    # Azure Cognitive Search operations
-├── rag_manager.py       # RAG operations with Azure OpenAI
-├── db_manager.py        # Cosmos DB operations
-├── main.py             # High-level interface
-└── .env.template       # Environment variables template
-```
+## Insurance-Specific Features
+
+- **Plan Comparison**: Compare different insurance plans based on coverage and benefits
+- **Coverage Verification**: Check if specific treatments or procedures are covered
+- **Benefit Explanation**: Get detailed explanations of insurance benefits
+- **Policy Interpretation**: Understand complex insurance policy language
+- **Claim Guidance**: Receive guidance on filing insurance claims
+- **Premium Calculation**: Understand how premiums are calculated
+- **Network Information**: Find information about in-network providers
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit your changes: `git commit -am 'Add your feature'`
-4. Push to the branch: `git push origin feature/your-feature`
+2. Create a feature branch: `git checkout -b feature/your-feature-name`
+3. Commit your changes: `git commit -am 'Add some feature'`
+4. Push to the branch: `git push origin feature/your-feature-name`
 5. Submit a pull request
 
 ## License
@@ -173,7 +202,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- Azure OpenAI Service
-- Azure Cognitive Search
-- Azure Blob Storage
-- Azure Cosmos DB 
+- HEALRAG library for the core RAG functionality
+- Azure Blob Storage for insurance document storage
+- Azure Cognitive Search for semantic search capabilities
+- Azure OpenAI for language model integration
+- Azure Cosmos DB for conversation storage
+- Point32 Health for insurance domain expertise 

@@ -9,11 +9,15 @@ upload to response generation with citations.
 import os
 import json
 import re
+import sys
 from typing import List, Dict, Any, Optional, Union, Generator, Tuple
 from datetime import datetime
 from dotenv import load_dotenv
 
-from HEALRAG.main import HEALRAG
+# Add the src directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.HEALRAG.main import HEALRAG
 
 # Load environment variables
 load_dotenv()
