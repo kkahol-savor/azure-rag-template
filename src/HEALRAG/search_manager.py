@@ -1,46 +1,32 @@
 """
 Search Manager Module
 
-This module provides functions for managing Azure Cognitive Search operations.
-It includes index creation, population, and search functionality with semantic search capabilities.
+This module provides functionality for managing Azure Cognitive Search operations.
 """
 
 import os
 import json
-from typing import List, Dict, Any, Optional, Union, Tuple
-from datetime import datetime
+import glob  # Add this import for iterating through files
+from typing import List, Dict, Any, Optional
 from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import (
     SearchIndex,
     SimpleField,
     SearchableField,
-    ComplexField,
     SearchFieldDataType,
-    ScoringProfile,
-    TextWeights,
-    SemanticConfiguration
+    SemanticConfiguration,
+    SemanticField
 )
-from azure.search.documents import SearchClient
-from azure.search.documents.models import QueryType
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Azure Cognitive Search configuration
-AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
-AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
-AZURE_SEARCH_INDEX_NAME = os.getenv("AZURE_SEARCH_INDEX_NAME", "insurance-plans")
-TOP_N_DOCUMENTS = int(os.getenv("TOP_N_DOCUMENTS", "5"))
-PROGRESS_FILE = os.getenv("SEARCH_PROGRESS_FILE", "search_progress.ndjson")
-
 class SearchManager:
     """
     A class to manage Azure Cognitive Search operations.
-    
-    This class provides methods for creating and populating search indices,
-    as well as performing searches with semantic capabilities.
     """
     
     def __init__(
@@ -53,329 +39,221 @@ class SearchManager:
         Initialize the SearchManager.
         
         Args:
-            endpoint: Azure Cognitive Search endpoint
-            key: Azure Cognitive Search key
-            index_name: Name of the index to use
+            endpoint: Azure Search endpoint
+            key: Azure Search key
+            index_name: Name of the search index
         """
-        self.endpoint = endpoint or AZURE_SEARCH_ENDPOINT
-        self.key = key or AZURE_SEARCH_KEY
-        self.index_name = index_name or AZURE_SEARCH_INDEX_NAME
+        self.endpoint = endpoint or os.getenv("AZURE_SEARCH_ENDPOINT")
+        self.key = key or os.getenv("AZURE_SEARCH_KEY")
+        self.index_name = index_name or os.getenv("AZURE_SEARCH_INDEX_NAME", "insurance-plans")
         
         if not self.endpoint or not self.key:
-            raise ValueError("Azure Cognitive Search endpoint and key are required")
+            raise ValueError("Azure Search endpoint and key are required")
         
         self.credential = AzureKeyCredential(self.key)
-        self.index_client = SearchIndexClient(endpoint=self.endpoint, credential=self.credential)
-        self.search_client = None
+        
+        # Create clients
+        self.search_client = SearchClient(
+            endpoint=self.endpoint,
+            index_name=self.index_name,
+            credential=self.credential
+        )
+        
+        self.index_client = SearchIndexClient(
+            endpoint=self.endpoint,
+            credential=self.credential
+        )
+        
+        print(f"SearchManager initialized with endpoint: {self.endpoint}, index_name: {self.index_name}")
     
-    def _initialize_search_client(self) -> None:
+    def create_bm25_index(self, fields: List[Dict[str, Any]]) -> None:
         """
-        Initialize the search client if it hasn't been initialized yet.
-        """
-        if not self.search_client:
-            self.search_client = SearchClient(
-                endpoint=self.endpoint,
-                index_name=self.index_name,
-                credential=self.credential
-            )
-    
-    def create_index(self, fields: List[Union[SimpleField, SearchableField, ComplexField]], 
-                    scoring_profile: Optional[ScoringProfile] = None,
-                    semantic_config: Optional[SemanticConfiguration] = None) -> SearchIndex:
-        """
-        Create a search index with the specified schema.
+        Create a search index with BM25 plain filter search.
         
         Args:
-            fields: List of fields to include in the index
-            scoring_profile: Optional scoring profile for custom ranking
-            semantic_config: Optional semantic configuration for semantic search
-            
-        Returns:
-            Created SearchIndex
+            fields: List of field definitions as JSON
         """
-        # Create the index with basic configuration
+        print("Creating BM25 index...")
+        print(f"Fields received for BM25 index: {json.dumps(fields, indent=4)}")
+        
+        # Parse fields into Azure Search field objects
+        azure_fields = []
+        for field in fields:
+            if field.get("searchable", False):
+                azure_fields.append(SearchableField(
+                    name=field["name"],
+                    type=SearchFieldDataType[field["type"]],
+                    filterable=field.get("filterable", False),
+                    sortable=field.get("sortable", False),
+                    facetable=field.get("facetable", False)
+                ))
+            else:
+                azure_fields.append(SimpleField(
+                    name=field["name"],
+                    type=SearchFieldDataType[field["type"]],
+                    filterable=field.get("filterable", False),
+                    sortable=field.get("sortable", False),
+                    facetable=field.get("facetable", False)
+                ))
+        
+        # Create the index
         index = SearchIndex(
             name=self.index_name,
-            fields=fields
+            fields=azure_fields
         )
         
-        # Add scoring profile if provided
-        if scoring_profile:
-            index.scoring_profiles = [scoring_profile]
-        
-        # Add semantic configuration if provided
-        if semantic_config:
-            # In newer versions of the SDK, semantic settings are handled through the semantic_config
-            index.semantic_settings = semantic_config
-        
+        # Create or update the index
         try:
-            result = self.index_client.create_or_update_index(index)
-            print(f"Index '{result.name}' created successfully")
-            
-            # Record progress
-            self._record_progress({
-                "operation": "create_index",
-                "index_name": self.index_name,
-                "timestamp": datetime.now().isoformat(),
-                "status": "success"
-            })
-            
-            return result
+            self.index_client.create_or_update_index(index)
+            print(f"BM25 index created successfully for index: {self.index_name}")
         except Exception as e:
-            # Record failure
-            self._record_progress({
-                "operation": "create_index",
-                "index_name": self.index_name,
-                "timestamp": datetime.now().isoformat(),
-                "status": "failed",
-                "error": str(e)
-            })
-            
+            print(f"Error creating BM25 index: {str(e)}")
             raise
     
-    def create_default_semantic_config(self, content_fields: List[str], 
-                                     keywords_fields: Optional[List[str]] = None) -> SemanticConfiguration:
+    def create_semantic_index(self, fields: List[Dict[str, Any]]) -> None:
         """
-        Create a default semantic configuration for semantic search.
+        Create a search index with semantic search enabled.
         
         Args:
-            content_fields: List of fields to use for semantic search
-            keywords_fields: Optional list of fields to use for keyword extraction
-            
-        Returns:
-            SemanticConfiguration
+            fields: List of field definitions as JSON
         """
-        # In newer versions of the SDK, the structure is different
-        return SemanticConfiguration(
-            name="default",
+        print("Creating semantic index...")
+        print(f"Fields received for semantic index: {json.dumps(fields, indent=4)}")
+
+        # Map Edm types to SearchFieldDataType
+        edm_to_search_field_type = {
+            "Edm.String": SearchFieldDataType.String,
+            "Edm.Double": SearchFieldDataType.Double,
+            "Edm.DateTimeOffset": SearchFieldDataType.DateTimeOffset
+        }
+
+        # Parse fields into Azure Search field objects
+        azure_fields = []
+        key_field_set = False
+        for field in fields:
+            field_type = edm_to_search_field_type.get(field["type"])
+            if not field_type:
+                raise ValueError(f"Unsupported field type: {field['type']}")
+
+            if field.get("key", False):
+                if key_field_set:
+                    raise ValueError("Multiple key fields found. Only one key field is allowed.")
+                key_field_set = True
+
+            if field.get("searchable", False):
+                azure_fields.append(SearchableField(
+                    name=field["name"],
+                    type=field_type,
+                    filterable=field.get("filterable", False),
+                    sortable=field.get("sortable", False),
+                    facetable=field.get("facetable", False),
+                    key=field.get("key", False)
+                ))
+            else:
+                azure_fields.append(SimpleField(
+                    name=field["name"],
+                    type=field_type,
+                    filterable=field.get("filterable", False),
+                    sortable=field.get("sortable", False),
+                    facetable=field.get("facetable", False),
+                    key=field.get("key", False)
+                ))
+
+        if not key_field_set:
+            raise ValueError("No key field found. Each index must have exactly one key field.")
+
+        # Define semantic configuration (without SemanticSettings)
+        semantic_config = SemanticConfiguration(
+            name="semantic-config",
             prioritized_fields={
-                "contentFields": [{"fieldName": field} for field in content_fields],
-                "keywordsFields": [{"fieldName": field} for field in (keywords_fields or [])]
+                "titleField": None,
+                "contentFields": [SemanticField(field_name="content")],
+                "keywordsField": None
             }
         )
-    
-    def create_default_scoring_profile(self, field_weights: Dict[str, float]) -> ScoringProfile:
-        """
-        Create a default scoring profile for custom ranking.
-        
-        Args:
-            field_weights: Dictionary of field names and their weights
-            
-        Returns:
-            ScoringProfile
-        """
-        return ScoringProfile(
-            name="default",
-            text_weights=TextWeights(weights=field_weights)
+
+        # Create the index with semantic configuration
+        index = SearchIndex(
+            name=self.index_name,
+            fields=azure_fields,
         )
+
+        # Create or update the index
+        try:
+            self.index_client.create_or_update_index(index)
+            print(f"Semantic index created successfully for index: {self.index_name}")
+        except Exception as e:
+            print(f"Error creating semantic index: {str(e)}")
+            raise
     
-    def populate_index(self, documents: List[Dict[str, Any]], batch_size: int = 1000) -> Dict[str, Any]:
+    def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
         """
-        Populate the search index with documents.
-        
-        Args:
-            documents: List of documents to index
-            batch_size: Size of batches for uploading
-            
-        Returns:
-            Dictionary with indexing results
-        """
-        # Initialize search client if not already done
-        if not self.search_client:
-            self._initialize_search_client()
-        
-        # Create a progress log file
-        progress_file = "search_progress.ndjson"
-        with open(progress_file, "w") as f:
-            f.write("")  # Clear the file if it exists
-        
-        total_documents = len(documents)
-        indexed_documents = 0
-        failed_documents = []
-        
-        # Process documents in batches
-        for i in range(0, total_documents, batch_size):
-            batch = documents[i:i + batch_size]
-            try:
-                # Upload batch
-                result = self.search_client.upload_documents(documents=batch)
-                
-                # Log successful documents
-                with open(progress_file, "a") as f:
-                    for doc in batch:
-                        f.write(json.dumps({
-                            "chunk_id": doc.get("chunk_id", "unknown"),
-                            "plan_name": doc.get("plan_name", "unknown"),
-                            "state": doc.get("state", "unknown"),
-                            "file_type": doc.get("file_type", "unknown"),
-                            "status": "success"
-                        }) + "\n")
-                
-                indexed_documents += len(batch)
-                print(f"Uploaded batch of {len(batch)} documents")
-                
-            except Exception as e:
-                # Log failed documents
-                with open(progress_file, "a") as f:
-                    for doc in batch:
-                        f.write(json.dumps({
-                            "chunk_id": doc.get("chunk_id", "unknown"),
-                            "plan_name": doc.get("plan_name", "unknown"),
-                            "state": doc.get("state", "unknown"),
-                            "file_type": doc.get("file_type", "unknown"),
-                            "status": "failed",
-                            "error": str(e)
-                        }) + "\n")
-                failed_documents.extend(batch)
-                print(f"Failed to upload batch: {str(e)}")
-        
-        print(f"Successfully indexed {indexed_documents} documents")
-        print(f"Failed to index {len(failed_documents)} documents")
-        
-        return {
-            "total": total_documents,
-            "indexed": indexed_documents,
-            "failed": len(failed_documents),
-            "failed_details": failed_documents
-        }
-    
-    def search(
-        self,
-        query: str,
-        top: Optional[int] = None,
-        filter: Optional[str] = None,
-        select: Optional[List[str]] = None,
-        semantic_search: bool = True,
-        semantic_configuration_name: str = "basic",
-        scoring_profile_name: str = "insurancePlansScoring"
-    ) -> List[Dict[str, Any]]:
-        """
-        Search the index with the given query.
+        Search the index.
         
         Args:
             query: Search query
-            top: Number of results to return
-            filter: OData filter expression
-            select: List of fields to return
-            semantic_search: Whether to use semantic search
-            semantic_configuration_name: Name of the semantic configuration to use
-            scoring_profile_name: Name of the scoring profile to use
-            
-        Returns:
-            List of search results ordered by semantic score
-        """
-        # Initialize search client if not already done
-        if not self.search_client:
-            self.search_client = SearchClient(
-                endpoint=self.endpoint,
-                index_name=self.index_name,
-                credential=self.credential
-            )
-        
-        # Set up search options
-        search_options = {
-            "scoring_profile": scoring_profile_name  # Use the insurance plans scoring profile
-        }
-        
-        if semantic_search:
-            search_options["query_type"] = QueryType.SEMANTIC
-            search_options["query_language"] = "en-us"
-            search_options["semantic_configuration_name"] = semantic_configuration_name
-        
-        # Perform the search
-        top = top or TOP_N_DOCUMENTS
-        results = list(self.search_client.search(
-            search_text=query,
-            top=top,
-            filter=filter,
-            select=select,
-            **search_options
-        ))
-        
-        # Record search
-        self._record_progress({
-            "operation": "search",
-            "index_name": self.index_name,
-            "query": query,
-            "top": top,
-            "results_count": len(results),
-            "timestamp": datetime.now().isoformat(),
-            "status": "success"
-        })
-        
-        return results
-    
-    def semantic_search(
-        self,
-        query: str,
-        top: Optional[int] = None,
-        filter: Optional[str] = None,
-        select: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Perform a semantic search with the given query.
-        
-        Args:
-            query: Search query
-            top: Number of results to return
-            filter: OData filter expression
-            select: List of fields to return
+            **kwargs: Additional search parameters
             
         Returns:
             List of search results
         """
-        return self.search(
-            query=query,
-            top=top,
-            filter=filter,
-            select=select,
-            semantic_search=True,
-            query_type=QueryType.SEMANTIC
-        )
-    
-    def _record_progress(self, record: Dict[str, Any]) -> None:
-        """
-        Record operation progress in NDJSON format.
-        
-        Args:
-            record: Dictionary with operation details
-        """
-        os.makedirs(os.path.dirname(PROGRESS_FILE) or ".", exist_ok=True)
-        
-        with open(PROGRESS_FILE, "a") as f:
-            f.write(json.dumps(record) + "\n")
-    
-    def get_progress(self) -> List[Dict[str, Any]]:
-        """
-        Get all recorded progress.
-        
-        Returns:
-            List of progress records
-        """
-        if not os.path.exists(PROGRESS_FILE):
+        print(f"Executing search with query: '{query}' and parameters: {kwargs}")
+        try:
+            results = self.search_client.search(query, **kwargs)
+            results_list = [dict(result) for result in results]
+            print(f"Search results: {json.dumps(results_list, indent=4)}")
+            return results_list
+        except Exception as e:
+            print(f"Error during search: {str(e)}")
             return []
-        
-        records = []
-        with open(PROGRESS_FILE, "r") as f:
-            for line in f:
-                if line.strip():
-                    records.append(json.loads(line))
-        
-        return records
     
-    def get_last_operation(self, operation_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def upload_documents(self, documents: List[Dict[str, Any]]) -> None:
         """
-        Get the last recorded operation.
+        Upload documents to the index.
         
         Args:
-            operation_type: Filter by operation type (create_index, populate_index, search)
-            
-        Returns:
-            Last operation record or None
+            documents: List of documents to upload
         """
-        records = self.get_progress()
+        print(f"Uploading {len(documents)} documents to index: {self.index_name}")
+        try:
+            self.search_client.upload_documents(documents=documents)
+            print("Documents uploaded successfully.")
+        except Exception as e:
+            print(f"Error uploading documents: {str(e)}")
+            raise
+
+    def setup_rag_pipeline(self, data_dir: str) -> List[Dict[str, Any]]:
+        """
+        Set up the RAG pipeline by aggregating fields from JSON files in a directory.
         
-        if operation_type:
-            records = [r for r in records if r.get("operation") == operation_type]
+        Args:
+            data_dir: Directory containing JSON files
         
-        return records[-1] if records else None 
+        Returns:
+            Aggregated fields as a list of dictionaries
+        """
+        print(f"Setting up RAG pipeline for data directory: {data_dir}")
+        aggregated_fields = []
+        json_files = glob.glob(os.path.join(data_dir, "*.json"))
+        print(f"Found {len(json_files)} JSON files in directory.")
+        
+        for json_file in json_files:
+            print(f"Processing file: {json_file}")
+            with open(json_file, "r") as f:
+                json_data = json.load(f)
+            
+            # Generate fields for the current JSON file
+            fields = self.generate_fields_from_json(json_data)
+            
+            # Add fields to the aggregated list, avoiding duplicates
+            for field in fields:
+                if field not in aggregated_fields:
+                    aggregated_fields.append(field)
+        
+        # Write the aggregated fields to a JSON file
+        with open("aggregated_fields.json", "w") as f:
+            json.dump(aggregated_fields, f, indent=4)
+        
+        print(f"Aggregated fields: {json.dumps(aggregated_fields, indent=4)}")
+        return aggregated_fields
+

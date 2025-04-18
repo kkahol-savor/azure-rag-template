@@ -248,27 +248,32 @@ class HEALRAG:
             top: Number of results to return
             filter: OData filter expression
             select: List of fields to return
-            semantic_search: Whether to use semantic search
+            semantic_search: Whether to use semantic search (ignored for now)
             
         Returns:
-            List of search results ordered by semantic score
+            List of search results ordered by score
         """
-        # Get search results with semantic configuration and scoring profile
-        results = self.search_manager.search(
-            query=query,
-            top=top,
-            filter=filter,
-            select=select,
-            semantic_search=semantic_search,
-            semantic_configuration_name="basic",
-            scoring_profile_name="insurancePlansScoring"
-        )
-        
-        # Sort results by semantic score in descending order
-        if semantic_search and results:
-            results.sort(key=lambda x: x.get('@search.score', 0), reverse=True)
-        
-        return results
+        try:
+            # Get search results with minimal parameters
+            results = self.search_manager.search(
+                query=query,
+                top=top,
+                filter=filter,
+                select=select,
+                semantic_search=False,  # Disable semantic search for now
+                semantic_configuration_name=None,
+                scoring_profile_name=None
+            )
+            
+            # Sort results by score in descending order if available
+            if results:
+                results.sort(key=lambda x: x.get('@search.score', 0), reverse=True)
+            
+            return results
+        except Exception as e:
+            print(f"Search error: {str(e)}")
+            # Return empty results if search fails
+            return []
     
     def generate_response(self, query: str, context: List[Dict[str, Any]], 
                          stream: bool = True) -> Union[str, Generator[str, None, None]]:

@@ -19,6 +19,7 @@ load_dotenv()
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4")
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "10"))
 PROGRESS_FILE = os.getenv("RAG_PROGRESS_FILE", "rag_progress.ndjson")
 
@@ -323,4 +324,24 @@ class RAGManager:
             Last operation record or None
         """
         records = self.get_progress()
-        return records[-1] if records else None 
+        return records[-1] if records else None
+    
+    def get_embedding(self, text: str) -> List[float]:
+        """
+        Get embedding for text using Azure OpenAI.
+        
+        Args:
+            text: Text to get embedding for
+            
+        Returns:
+            List of floats representing the embedding
+        """
+        try:
+            response = self.client.embeddings.create(
+                model=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
+                input=text
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            print(f"Error getting embedding: {str(e)}")
+            return [] 

@@ -10,6 +10,10 @@ This project leverages the HEALRAG library to create a specialized RAG (Retrieva
 
 - **Insurance Document Management**: Upload and manage insurance documents in Azure Blob Storage
 - **Semantic Search**: Find relevant insurance information using Azure Cognitive Search
+  - Natural language queries
+  - Semantic understanding of insurance terms
+  - Filter by plan, state, or document type
+  - Combined SBC and SOB document search
 - **Intelligent Responses**: Generate accurate answers to insurance-related questions using Azure OpenAI
 - **Conversation History**: Store and retrieve user conversations using Cosmos DB
 - **Progress Tracking**: Monitor operations using NDJSON format
@@ -18,6 +22,54 @@ This project leverages the HEALRAG library to create a specialized RAG (Retrieva
 - **Batch Processing**: Support for batch operations on insurance documents
 - **Streaming Support**: Stream responses for real-time interactions
 - **Web Interface**: User-friendly web application for interacting with the system
+
+## Search Functionality
+
+The system provides powerful search capabilities through Azure Cognitive Search:
+
+### Basic Search
+```python
+from HEALRAG.main import HEALRAG
+
+# Initialize HEALRAG
+healrag = HEALRAG()
+
+# Simple search
+results = healrag.search(
+    query="What are the covered services for diabetes?",
+    top=5  # Number of results to return
+)
+```
+
+### Advanced Search
+```python
+# Search with filters and field selection
+results = healrag.search(
+    query="What are the covered services for diabetes?",
+    top=5,
+    filter="state eq 'MA'",  # Filter by state
+    select=["plan_name", "state", "content", "qa_questions", "qa_answers"]  # Fields to return
+)
+```
+
+### Search Features
+- **Semantic Search**: Understands natural language queries about insurance
+- **Field Filtering**: Filter results by any indexed field (plan_name, state, file_type)
+- **Field Selection**: Choose which fields to return in results
+- **Combined Documents**: Each result contains data from both SBC and SOB files
+- **Structured Data**: Access specific fields like:
+  - Q&A data (questions, answers, why it matters)
+  - Medical events (events, services, costs, limitations)
+  - Excluded services
+  - Other covered services
+
+### Search Results
+Each search result includes:
+- Plan name and state
+- Combined content from SBC and SOB documents
+- Structured data fields
+- Relevance score
+- Source document references
 
 ## Installation
 

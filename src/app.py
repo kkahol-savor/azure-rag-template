@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 import uuid
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Add the src directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -122,11 +123,15 @@ async def query(request: QueryRequest):
         # Process the query
         response = rag.query_rag(request.query, stream=False, save_conversation=True)
         
+        # Try to get the conversation from the database
+        conversation = rag.healrag.db_manager.get_conversation(session_id)
+        
         # Store the session
         active_sessions[session_id] = {
             "query": request.query,
             "response": response,
-            "timestamp": rag.healrag.db_manager.get_conversation(session_id)
+            "timestamp": datetime.now().isoformat(),
+            "conversation": conversation
         }
         
         return {
@@ -200,10 +205,14 @@ async def get_conversation(session_id: str):
             return active_sessions[session_id]
         
         # Get the conversation from the database
-        conversation = rag.healrag.get_conversation(session_id)
+        conversation = rag.healrag.db_manager.get_conversation(session_id)
         
         if not conversation:
-            raise HTTPException(status_code=404, detail="Conversation not found")
+            # Return a 404 response with a more descriptive message
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"Conversation with ID {session_id} not found"}
+            )
         
         return conversation
     except HTTPException:
