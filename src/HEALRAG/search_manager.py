@@ -20,6 +20,10 @@ from azure.search.documents.indexes.models import (
     SemanticField
 )
 from dotenv import load_dotenv
+from azure.storage.blob import BlobServiceClient
+import re
+import uuid
+import time
 
 # Load environment variables
 load_dotenv()
@@ -75,7 +79,15 @@ class SearchManager:
         """
         print("Creating BM25 index...")
         print(f"Fields received for BM25 index: {json.dumps(fields, indent=4)}")
-        
+
+        # Check if the index already exists
+        try:
+            existing_index = self.index_client.get_index(self.index_name)
+            print(f"Index '{self.index_name}' already exists. Using existing index.")
+            return
+        except Exception:
+            print(f"Index '{self.index_name}' does not exist. Creating a new one.")
+
         # Parse fields into Azure Search field objects
         azure_fields = []
         for field in fields:
@@ -119,6 +131,14 @@ class SearchManager:
         """
         print("Creating semantic index...")
         print(f"Fields received for semantic index: {json.dumps(fields, indent=4)}")
+
+        # Check if the index already exists
+        try:
+            existing_index = self.index_client.get_index(self.index_name)
+            print(f"Index '{self.index_name}' already exists. Using existing index.")
+            return
+        except Exception:
+            print(f"Index '{self.index_name}' does not exist. Creating a new one.")
 
         # Map Edm types to SearchFieldDataType
         edm_to_search_field_type = {
@@ -186,20 +206,66 @@ class SearchManager:
             print(f"Error creating semantic index: {str(e)}")
             raise
     
-    def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        index_name: Optional[str] = None,
+        search_type: str = "hybrid",  # Default to hybrid search
+        top: int = 10,
+        select_fields: Optional[List[str]] = None,
+        scoring_profile: Optional[str] = "basic",  # Default scoring profile
+        semantic_configuration_name: Optional[str] = "basic",  # Default semantic configuration
+        **kwargs
+    ) -> List[Dict[str, Any]]:
         """
         Search the index.
-        
+
         Args:
-            query: Search query
-            **kwargs: Additional search parameters
-            
+            query: Search query.
+            index_name: Name of the search index to query. Defaults to the initialized index.
+            search_type: Type of search to perform ("bm25", "semantic", or "hybrid"). Defaults to "hybrid".
+            top: Number of documents to retrieve. Defaults to 10.
+            select_fields: List of fields to retrieve in the results. Defaults to None (all fields).
+            scoring_profile: Scoring profile to use for ranking results. Defaults to "basic-profile".
+            semantic_configuration_name: Semantic configuration to use for semantic or hybrid search. Defaults to "basic-profile".
+            **kwargs: Additional search parameters.
+
         Returns:
-            List of search results
+            List of search results as dictionaries.
         """
-        print(f"Executing search with query: '{query}' and parameters: {kwargs}")
+        index_name = index_name or self.index_name  # Use the provided index name or default to the initialized one
+        print(f"Executing {search_type} search on index: '{index_name}' with query: '{query}'")
+
+        # Initialize a new SearchClient for the specified index
+        search_client = SearchClient(
+            endpoint=self.endpoint,
+            index_name=index_name,
+            credential=self.credential
+        )
+
+        # Determine query type based on search_type
+        if search_type.lower() == "semantic":
+            query_type = "semantic"
+        elif search_type.lower() == "bm25":
+            query_type = "simple"
+        elif search_type.lower() == "hybrid":
+            query_type = "semantic"  # Hybrid uses semantic query type with additional configurations
+            kwargs["semantic_configuration_name"] = semantic_configuration_name
+        else:
+            raise ValueError(f"Unsupported search_type: {search_type}")
+
+        # Build search parameters
+        search_parameters = {
+            "query_type": query_type,
+            "top": top,
+            "select": select_fields,
+            "scoring_profile": scoring_profile,
+            **kwargs
+        }
+
         try:
-            results = self.search_client.search(query, **kwargs)
+            # Perform the search
+            results = search_client.search(query, **search_parameters)
             results_list = [dict(result) for result in results]
             print(f"Search results: {json.dumps(results_list, indent=4)}")
             return results_list
@@ -222,38 +288,98 @@ class SearchManager:
             print(f"Error uploading documents: {str(e)}")
             raise
 
-    def setup_rag_pipeline(self, data_dir: str) -> List[Dict[str, Any]]:
+    def semantic_index_populator(self, field_input: str, container_name: str, file_mapping: List[Dict[str, Any]]) -> None:
         """
-        Set up the RAG pipeline by aggregating fields from JSON files in a directory.
-        
+        Populate a semantic index from a given blob storage container.
+
         Args:
-            data_dir: Directory containing JSON files
-        
-        Returns:
-            Aggregated fields as a list of dictionaries
+            field_input: Regular expression for identifying field-relevant files.
+            container_name: Name of the blob storage container.
+            file_mapping: List of dictionaries mapping field-populator files to files to be indexed.
         """
-        print(f"Setting up RAG pipeline for data directory: {data_dir}")
-        aggregated_fields = []
-        json_files = glob.glob(os.path.join(data_dir, "*.json"))
-        print(f"Found {len(json_files)} JSON files in directory.")
-        
-        for json_file in json_files:
-            print(f"Processing file: {json_file}")
-            with open(json_file, "r") as f:
-                json_data = json.load(f)
-            
-            # Generate fields for the current JSON file
-            fields = self.generate_fields_from_json(json_data)
-            
-            # Add fields to the aggregated list, avoiding duplicates
-            for field in fields:
-                if field not in aggregated_fields:
-                    aggregated_fields.append(field)
-        
-        # Write the aggregated fields to a JSON file
-        with open("aggregated_fields.json", "w") as f:
-            json.dump(aggregated_fields, f, indent=4)
-        
-        print(f"Aggregated fields: {json.dumps(aggregated_fields, indent=4)}")
-        return aggregated_fields
+        print(f"Populating semantic index from container: {container_name} with field input pattern: {field_input}")
+
+        # Initialize BlobServiceClient
+        blob_service_client = BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+        container_client = blob_service_client.get_container_client(container_name)
+
+        # Get chunk size from environment
+        chunk_size = int(os.getenv("FILE_CHUNKING_SIZE", 4096))  # Default to 4096 bytes if not set
+
+        # Validate file_mapping structure
+        if not isinstance(file_mapping, list) or not all(
+            isinstance(mapping, dict) and "field_key_file" in mapping and "files_to_be_indexed" in mapping
+            for mapping in file_mapping
+        ):
+            raise ValueError("file_mapping must be a list of dictionaries with 'field_key_file' and 'files_to_be_indexed' keys.")
+
+        # Process each mapping
+        for mapping in file_mapping:
+            field_key_file = mapping["field_key_file"]
+            files_to_index = mapping["files_to_be_indexed"]
+
+            # Ensure the field_key_file exists in the container
+            try:
+                field_blob_client = container_client.get_blob_client(field_key_file)
+                field_data = json.loads(field_blob_client.download_blob().readall())
+                print(f"Field data for '{field_key_file}': {json.dumps(field_data, indent=4)}")
+            except Exception as e:
+                print(f"Failed to process field key file '{field_key_file}': {e}")
+                continue
+
+            # Prepare documents for indexing
+            documents = []
+            for file_name in files_to_index:
+                try:
+                    file_blob_client = container_client.get_blob_client(file_name)
+                    file_content = file_blob_client.download_blob().readall().decode("utf-8", errors="ignore")
+
+                    # Chunk the file content
+                    for i in range(0, len(file_content), chunk_size):
+                        chunk = file_content[i:i + chunk_size]
+                        chunk_id = f"{uuid.uuid4()}_{os.path.splitext(file_name)[0]}"
+                        document = {
+                            "chunk_id": chunk_id,
+                            "parent_id": file_name,
+                            "content": chunk
+                        }
+
+                        # Populate fields from field_key_file
+                        for key, value in field_data.items():
+                            if isinstance(value, (list, dict)):
+                                document[key] = str(value)  # Convert lists/dicts to strings
+                            else:
+                                document[key] = value  # Use the value directly
+
+                        documents.append(document)
+                except Exception as e:
+                    print(f"Failed to process file '{file_name}': {e}")
+
+            # Log total documents for the field_key_file
+            print(f"Total documents prepared for '{field_key_file}': {len(documents)}")
+
+            # Upload documents to the index in batches to handle rate limits
+            batch_size = int(os.getenv("BATCH_SIZE", 100))  # Default to 100 if not set
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i + batch_size]
+                retry_attempts = 0
+                max_retries = 5  # Maximum number of retries
+                backoff_time = 5  # Initial backoff time in seconds
+
+                while retry_attempts <= max_retries:
+                    try:
+                        self.upload_documents(batch)
+                        print(f"Indexed batch {i // batch_size + 1} for field key file '{field_key_file}' successfully.")
+                        break  # Exit retry loop on success
+                    except Exception as e:
+                        retry_attempts += 1
+                        if retry_attempts > max_retries:
+                            print(f"Failed to index batch {i // batch_size + 1} after {max_retries} retries: {e}")
+                            break
+                        print(f"Rate limit or other error occurred while indexing batch {i // batch_size + 1}: {e}")
+                        print(f"Retrying in {backoff_time} seconds (attempt {retry_attempts}/{max_retries})...")
+                        time.sleep(backoff_time)
+                        backoff_time *= 2  # Exponential backoff
+
+
 
