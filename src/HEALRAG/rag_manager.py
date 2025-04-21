@@ -125,8 +125,8 @@ class RAGManager:
             )
 
             if stream:
-                return self._process_streaming_response(response, query)
-            return self._process_complete_response(response, query)
+                return self._process_streaming_response(response, query, context)
+            return self._process_complete_response(response, query, context)
 
         except Exception as e:
             self._record_progress({

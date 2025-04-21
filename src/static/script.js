@@ -145,6 +145,7 @@ async function handleSubmit() {
                     if (jsonStr) {
                         const data = JSON.parse(jsonStr);
                         if (data.response) {
+                            // Append the response text directly
                             responseText.innerHTML += data.response;
                             // Scroll to bottom of response
                             responseText.scrollTop = responseText.scrollHeight;

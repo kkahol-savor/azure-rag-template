@@ -193,11 +193,12 @@ async def query_stream(request: QueryRequest):
         
         async def format_stream():
             try:
-                async for chunk in response_generator:
+                for chunk in response_generator:
                     if isinstance(chunk, dict):
                         yield f"{json.dumps(chunk)}\n"
                     else:
-                        yield f"{json.dumps({'response': chunk})}\n"
+                        # The chunk is already a JSON string from the RAG manager
+                        yield f"{chunk}\n"
             except Exception as e:
                 yield f"{json.dumps({'error': str(e)})}\n"
         

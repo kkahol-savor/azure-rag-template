@@ -46,8 +46,8 @@ class InsuranceRAG:
         
         # Patch RAGManager._process_streaming_response to include context
         original_process_fn = self.rag_manager._process_streaming_response
-        def fixed_process_streaming_response(response, query):
-            return original_process_fn(response, query, search_results)
+        def fixed_process_streaming_response(response, query, context):
+            return original_process_fn(response, query, context)
         self.rag_manager._process_streaming_response = fixed_process_streaming_response
         
         # Patch _update_conversation_history to include session_id
