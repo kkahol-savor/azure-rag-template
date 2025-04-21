@@ -143,6 +143,7 @@ async function handleSubmit() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let currentCitations = [];
         
         while (true) {
             const { value, done } = await reader.read();
@@ -177,6 +178,51 @@ async function handleSubmit() {
             }
             
             buffer = buffer.substring(startIndex);
+        }
+        
+        // After streaming is complete, add citations if available
+        if (currentCitations.length > 0) {
+            // Filter citations to only include those with high matching scores (e.g., > 0.7)
+            const highScoringCitations = currentCitations.filter(citation => citation.score > 0.7);
+            
+            if (highScoringCitations.length > 0) {
+                // Create citation link
+                const citationLink = document.createElement('a');
+                citationLink.href = '#';
+                citationLink.className = 'citation-link';
+                citationLink.textContent = `View ${highScoringCitations.length} Sources`;
+                citationLink.onclick = function(e) {
+                    e.preventDefault();
+                    const citationsContainer = this.nextElementSibling;
+                    if (citationsContainer.style.display === 'none') {
+                        citationsContainer.style.display = 'block';
+                        this.textContent = 'Hide Sources';
+                    } else {
+                        citationsContainer.style.display = 'none';
+                        this.textContent = `View ${highScoringCitations.length} Sources`;
+                    }
+                };
+                messageContainer.appendChild(citationLink);
+
+                // Create citations container (hidden by default)
+                const citationsContainer = document.createElement('div');
+                citationsContainer.className = 'citations-container';
+                citationsContainer.style.display = 'none';
+                
+                const citationsTitle = document.createElement('h4');
+                citationsTitle.textContent = 'Sources:';
+                citationsContainer.appendChild(citationsTitle);
+                
+                const citationsList = document.createElement('ul');
+                highScoringCitations.forEach((citation, index) => {
+                    const citationItem = document.createElement('li');
+                    citationItem.innerHTML = `<strong>${citation.document}</strong>: ${citation.content}`;
+                    citationsList.appendChild(citationItem);
+                });
+                
+                citationsContainer.appendChild(citationsList);
+                messageContainer.appendChild(citationsContainer);
+            }
         }
         
         // After streaming is complete, refresh the conversation history
@@ -262,6 +308,8 @@ function renderConversationHistory() {
     conversationHistory.forEach(conversation => {
         const historyItem = document.createElement('div');
         historyItem.className = 'history-item';
+        historyItem.dataset.sessionId = conversation.id;
+        
         if (conversation.id === currentSessionId) {
             historyItem.classList.add('active');
         }
@@ -269,8 +317,14 @@ function renderConversationHistory() {
         const date = new Date(conversation.timestamp);
         const formattedDate = date.toLocaleString();
         
+        // Get the first message query as the conversation title
+        let queryText = "New Conversation";
+        if (conversation.messages && conversation.messages.length > 0) {
+            queryText = conversation.messages[0].query;
+        }
+        
         historyItem.innerHTML = `
-            <div class="query">${conversation.query}</div>
+            <div class="query">${queryText}</div>
             <div class="timestamp">${formattedDate}</div>
         `;
         
@@ -289,20 +343,49 @@ async function loadConversation(sessionId) {
         const conversation = await response.json();
         currentSessionId = sessionId;
         
-        // Display the conversation
-        queryInput.value = conversation.query;
-        displayResponse({
-            response: conversation.response,
-            citations: conversation.search_results || []
-        });
+        // Clear the current chat
+        responseText.innerHTML = '';
+        
+        // Display all messages in the conversation
+        if (conversation.messages && conversation.messages.length > 0) {
+            conversation.messages.forEach(message => {
+                // Create a message container for each message
+                const messageContainer = document.createElement('div');
+                messageContainer.className = 'message-container';
+                
+                // Add the query as a user message
+                const userMessage = document.createElement('div');
+                userMessage.className = 'user-message';
+                userMessage.textContent = message.query;
+                messageContainer.appendChild(userMessage);
+                
+                // Add the response container
+                const responseContainer = document.createElement('div');
+                responseContainer.className = 'response-container';
+                responseContainer.innerHTML = message.response;
+                messageContainer.appendChild(responseContainer);
+                
+                // Add the message container to the chat
+                responseText.appendChild(messageContainer);
+            });
+        }
+        
+        // Update citations if available
+        if (conversation.messages && conversation.messages.length > 0) {
+            const lastMessage = conversation.messages[conversation.messages.length - 1];
+            if (lastMessage.search_results && lastMessage.search_results.length > 0) {
+                currentCitations = lastMessage.search_results;
+            }
+        }
         
         // Update active state in history
         document.querySelectorAll('.history-item').forEach(item => {
             item.classList.remove('active');
-            if (item.querySelector('.query').textContent === conversation.query) {
+            if (item.dataset.sessionId === sessionId) {
                 item.classList.add('active');
             }
         });
+        
     } catch (error) {
         console.error('Error loading conversation:', error);
         displayError('Failed to load conversation. Please try again.');

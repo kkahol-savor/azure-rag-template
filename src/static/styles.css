@@ -521,4 +521,73 @@ nav {
 
 #settings-btn:hover {
     background-color: rgba(0, 0, 0, 0.1);
+}
+
+.message-container {
+    margin: 1rem 0;
+    padding: 1rem;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+}
+
+.user-message {
+    background-color: #ffa726;
+    color: white;
+    padding: 0.8rem 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.response-container {
+    background-color: #e9ecef;
+    color: #212529;
+    padding: 0.8rem 1rem;
+    border-radius: 8px;
+    line-height: 1.5;
+}
+
+.citations-container {
+    margin-top: 1rem;
+    padding: 1rem;
+    background-color: #f8f9fa;
+    border-radius: 0.5rem;
+    border-left: 4px solid #6c757d;
+}
+
+.citations-container h4 {
+    margin: 0 0 0.5rem 0;
+    color: #495057;
+    font-size: 0.9rem;
+}
+
+.citations-container ul {
+    margin: 0;
+    padding-left: 1rem;
+}
+
+.citations-container li {
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+    color: #6c757d;
+    line-height: 1.4;
+}
+
+.citations-container li strong {
+    color: #495057;
+}
+
+.citation-link {
+    display: inline-block;
+    margin-top: 1rem;
+    color: #007bff;
+    text-decoration: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.citation-link:hover {
+    color: #0056b3;
+    text-decoration: underline;
 } 

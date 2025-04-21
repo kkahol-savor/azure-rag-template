@@ -180,6 +180,14 @@ async def query_stream(request: QueryRequest):
         # Generate session ID if not provided
         session_id = request.session_id or str(uuid.uuid4())
         
+        # Initialize session if it doesn't exist
+        if session_id not in active_sessions:
+            active_sessions[session_id] = {
+                "id": session_id,
+                "messages": [],
+                "timestamp": datetime.now().isoformat()
+            }
+        
         # Instantiate InsuranceRAG and create a generator for the streaming response
         ir = InsuranceRAG()
         response_generator = ir.perform_rag(
@@ -209,14 +217,16 @@ async def query_stream(request: QueryRequest):
                         except json.JSONDecodeError:
                             pass
                 
-                # Store the complete conversation in active_sessions
-                active_sessions[session_id] = {
-                    "id": session_id,
+                # Add the new message to the conversation history
+                active_sessions[session_id]["messages"].append({
                     "query": request.query,
                     "response": full_response,
                     "timestamp": datetime.now().isoformat(),
                     "search_results": []  # You might want to store search results if available
-                }
+                })
+                
+                # Update the timestamp of the session
+                active_sessions[session_id]["timestamp"] = datetime.now().isoformat()
             except Exception as e:
                 yield f"{json.dumps({'error': str(e)})}\n"
         

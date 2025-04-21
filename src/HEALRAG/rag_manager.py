@@ -221,8 +221,15 @@ class RAGManager:
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 full_response += content
-                # Format the response as a JSON object with the content
-                yield json.dumps({"response": content}) + "\n"
+                # Format the response as a JSON object with the content and citations
+                yield json.dumps({
+                    "response": content,
+                    "citations": [{
+                        "document": doc.get("id", f"Document {i+1}"), 
+                        "content": doc.get("content", ""),
+                        "score": doc.get("@search.score", 0.0)  # Include the matching score
+                    } for i, doc in enumerate(context)]
+                }) + "\n"
         
         # Update conversation history
         self._update_conversation_history(query, full_response)
