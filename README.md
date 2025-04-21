@@ -111,4 +111,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Azure Cognitive Search for semantic search capabilities
 - Azure OpenAI for language model integration
 - Azure Cosmos DB for conversation storage
-- Point32 Health for insurance domain expertise 
