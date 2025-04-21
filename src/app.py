@@ -284,6 +284,13 @@ async def get_conversations(limit: int = 10):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint for Docker.
+    """
+    return {"status": "healthy"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

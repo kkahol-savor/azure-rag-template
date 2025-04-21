@@ -96,6 +96,54 @@ The project includes a modern web interface with the following features:
 - Source document references
 - Content snippets from source documents
 
+## Docker Deployment
+
+The application can be deployed using Docker for easier setup and consistency across environments.
+
+### Prerequisites
+
+- Docker and Docker Compose installed on your system
+- Azure credentials configured in a `.env` file
+
+### Setup
+
+1. Create a `.env` file based on the `.env.template`:
+```bash
+cp .env.template .env
+```
+
+2. Edit the `.env` file with your Azure credentials.
+
+3. Create the necessary directories:
+```bash
+mkdir -p data logs
+```
+
+4. Build and start the Docker container:
+```bash
+docker-compose up -d
+```
+
+5. The application will be available at `http://localhost:8000`.
+
+### Data Handling
+
+The application uses volume mounts for data persistence:
+- `./data:/app/data`: For insurance documents
+- `./logs:/app/logs`: For application logs
+
+### Environment Variables
+
+All environment variables from the `.env` file are passed to the container.
+
+### Health Checks
+
+The container includes a health check that verifies the application is running correctly.
+
+### Scaling
+
+For production deployments, consider using a container orchestration platform like Kubernetes.
+
 ## Installation
 
 1. Clone the repository:

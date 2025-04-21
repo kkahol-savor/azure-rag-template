@@ -1,0 +1,155 @@
+[
+    {
+        "name": "chunk_id",
+        "type": "Edm.String",
+        "searchable": false,
+        "filterable": true,
+        "sortable": true,
+        "facetable": false,
+        "key": true
+    },
+    {
+        "name": "parent_id",
+        "type": "Edm.String",
+        "searchable": true,
+        "filterable": true,
+        "sortable": true,
+        "facetable": false,
+        "key": false
+    },
+    {
+        "name": "sob_file",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "sbc_file",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "plan_name",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "state",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "qa_data",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "medical_events_data",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "excluded_services",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "other_covered_services",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "filename",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "creation_date",
+        "searchable": false,
+        "filterable": true,
+        "sortable": true,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.DateTimeOffset"
+    },
+    {
+        "name": "last_modified_date",
+        "searchable": false,
+        "filterable": true,
+        "sortable": true,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.DateTimeOffset"
+    },
+    {
+        "name": "file_size",
+        "searchable": false,
+        "filterable": true,
+        "sortable": true,
+        "facetable": true,
+        "key": false,
+        "type": "Edm.Double"
+    },
+    {
+        "name": "file_path",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "content",
+        "searchable": true,
+        "filterable": true,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Edm.String"
+    },
+    {
+        "name": "chunks",
+        "searchable": true,
+        "filterable": false,
+        "sortable": false,
+        "facetable": false,
+        "key": false,
+        "type": "Collection(Edm.String)"
+    }
+]
