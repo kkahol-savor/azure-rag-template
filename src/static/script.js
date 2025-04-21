@@ -17,9 +17,11 @@ const temperatureInput = document.getElementById('temperature');
 const temperatureValue = document.getElementById('temperature-value');
 const topPInput = document.getElementById('top-p');
 const topPValue = document.getElementById('top-p-value');
+const chatMessages = document.getElementById('chat-messages');
 
 // State
-let currentSessionId = null;
+let currentSessionId = localStorage.getItem('currentSessionId') || crypto.randomUUID();
+localStorage.setItem('currentSessionId', currentSessionId);
 let currentCitations = [];
 let conversationHistory = [];
 
@@ -46,6 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
             closeSettingsModal();
         }
     });
+
+    // Load initial conversation history
+    loadConversationHistory();
 });
 
 // Settings Functions
@@ -90,25 +95,20 @@ function updateRangeValue(input, valueElement) {
 async function handleSubmit() {
     const query = queryInput.value.trim();
     if (!query) return;
-
+    
     // Disable input and button during processing
     setLoadingState(true);
-
+    
     try {
         // Get current settings
         const settings = JSON.parse(localStorage.getItem('healrag_settings') || '{}');
         
-        // Generate session ID if not exists
-        if (!currentSessionId) {
-            currentSessionId = crypto.randomUUID();
-        }
-
         const response = await fetch('/api/query/stream', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 query,
                 session_id: currentSessionId,
                 plan_name_filter: settings.plan_name_filter,
@@ -116,19 +116,34 @@ async function handleSubmit() {
                 top_p: settings.top_p
             }),
         });
-
+        
         if (!response.ok) {
             throw new Error('Network response was not ok');
         }
-
-        // Clear previous response
-        responseText.innerHTML = '';
+        
+        // Create a new message container for this response
+        const messageContainer = document.createElement('div');
+        messageContainer.className = 'message-container';
+        
+        // Add the query as a user message
+        const userMessage = document.createElement('div');
+        userMessage.className = 'user-message';
+        userMessage.textContent = query;
+        messageContainer.appendChild(userMessage);
+        
+        // Add the response container
+        const responseContainer = document.createElement('div');
+        responseContainer.className = 'response-container';
+        messageContainer.appendChild(responseContainer);
+        
+        // Add the message container to the chat
+        responseText.appendChild(messageContainer);
         
         // Handle streaming response
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-
+        
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
@@ -145,8 +160,8 @@ async function handleSubmit() {
                     if (jsonStr) {
                         const data = JSON.parse(jsonStr);
                         if (data.response) {
-                            // Append the response text directly
-                            responseText.innerHTML += data.response;
+                            // Append the response text to the current response container
+                            responseContainer.innerHTML += data.response;
                             // Scroll to bottom of response
                             responseText.scrollTop = responseText.scrollHeight;
                         }
@@ -164,12 +179,15 @@ async function handleSubmit() {
             buffer = buffer.substring(startIndex);
         }
         
+        // After streaming is complete, refresh the conversation history
         await loadConversationHistory();
+        
     } catch (error) {
         console.error('Error:', error);
         displayError('An error occurred while processing your query. Please try again.');
     } finally {
         setLoadingState(false);
+        queryInput.value = ''; // Clear the input after sending
     }
 }
 
@@ -292,16 +310,16 @@ async function loadConversation(sessionId) {
 }
 
 function clearCurrentSession() {
-    // Clear current session but keep history in DB
-    currentSessionId = null;
-    queryInput.value = '';
+    // Generate a new session ID
+    currentSessionId = crypto.randomUUID();
+    localStorage.setItem('currentSessionId', currentSessionId);
+    
+    // Clear the chat
     responseText.innerHTML = '';
     currentCitations = [];
     
-    // Update active state in history
-    document.querySelectorAll('.history-item').forEach(item => {
-        item.classList.remove('active');
-    });
+    // Refresh the conversation history
+    loadConversationHistory();
 }
 
 function toggleHistoryPanel() {

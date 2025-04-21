@@ -193,12 +193,30 @@ async def query_stream(request: QueryRequest):
         
         async def format_stream():
             try:
+                full_response = ""
                 for chunk in response_generator:
                     if isinstance(chunk, dict):
                         yield f"{json.dumps(chunk)}\n"
+                        if "response" in chunk:
+                            full_response += chunk["response"]
                     else:
                         # The chunk is already a JSON string from the RAG manager
                         yield f"{chunk}\n"
+                        try:
+                            chunk_data = json.loads(chunk)
+                            if "response" in chunk_data:
+                                full_response += chunk_data["response"]
+                        except json.JSONDecodeError:
+                            pass
+                
+                # Store the complete conversation in active_sessions
+                active_sessions[session_id] = {
+                    "id": session_id,
+                    "query": request.query,
+                    "response": full_response,
+                    "timestamp": datetime.now().isoformat(),
+                    "search_results": []  # You might want to store search results if available
+                }
             except Exception as e:
                 yield f"{json.dumps({'error': str(e)})}\n"
         
