@@ -524,9 +524,19 @@ class DBManager:
             conversation_id: ID of the conversation to retrieve
             
         Returns:
-            Retrieved conversation
+            Retrieved conversation or None if not found
         """
-        return self.read_item(item_id=conversation_id, partition_key=conversation_id)
+        try:
+            # Use the conversation_id as both the item_id and partition_key
+            # This assumes the conversation was saved with the same ID as the partition key
+            return self.read_item(item_id=conversation_id, partition_key=conversation_id)
+        except CosmosHttpResponseError as e:
+            if e.status_code == 404:  # Not found
+                print(f"Conversation with ID {conversation_id} not found")
+                return None
+            else:
+                # Re-raise other errors
+                raise
     
     def _record_progress(self, record: Dict[str, Any]) -> None:
         """

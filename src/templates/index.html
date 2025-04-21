@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HEALRAG - Insurance Plan Assistant</title>
     <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
     <header>
@@ -13,6 +14,11 @@
         </div>
         <h1>HEALRAG</h1>
         <p>Your AI-powered insurance plan assistant</p>
+        <nav>
+            <button id="settings-btn" class="icon-btn" title="Settings">
+                <i class="fas fa-cog"></i>
+            </button>
+        </nav>
     </header>
 
     <main>
@@ -42,6 +48,38 @@
             </div>
         </div>
     </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button id="close-settings-btn" class="icon-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="settings-form" class="settings-form">
+                    <div class="form-group">
+                        <label for="plan-name-filter">Plan Name Filter:</label>
+                        <input type="text" id="plan-name-filter" name="plan_name_filter" placeholder="e.g., Clear Choice HMO Gold 1500">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="temperature">Temperature:</label>
+                        <input type="range" id="temperature" name="temperature" min="0" max="1" step="0.1" value="0.7">
+                        <span id="temperature-value">0.7</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="top-p">Top P:</label>
+                        <input type="range" id="top-p" name="top_p" min="0" max="1" step="0.1" value="0.9">
+                        <span id="top-p-value">0.9</span>
+                    </div>
+
+                    <button type="submit" class="save-settings-btn">Save Settings</button>
+                </form>
+            </div>
+        </div>
+    </div>
 
     <div id="citation-panel" class="citation-panel">
         <button id="close-citation-btn">&times;</button>

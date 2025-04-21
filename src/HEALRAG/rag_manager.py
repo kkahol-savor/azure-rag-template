@@ -11,6 +11,8 @@ from typing import List, Dict, Any, Optional, Generator, Tuple, Union
 from datetime import datetime
 from openai import AzureOpenAI
 from dotenv import load_dotenv
+import uuid
+from azure.cosmos import CosmosClient
 
 # Load environment variables
 load_dotenv()
@@ -18,7 +20,8 @@ load_dotenv()
 # Azure OpenAI configuration
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
-AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "10"))
 PROGRESS_FILE = os.getenv("RAG_PROGRESS_FILE", "rag_progress.ndjson")
 
@@ -61,70 +64,71 @@ class RAGManager:
         )
         
         self.conversation_history = []
+        
+        # Initialize Cosmos DB client and container using environment variables
+        self.cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
+        self.cosmos_key = os.getenv("COSMOS_KEY")
+        self.cosmos_database = os.getenv("COSMOS_DATABASE")
+        self.cosmos_container_name = os.getenv("COSMOS_CONTAINER")
+        if self.cosmos_endpoint and self.cosmos_key and self.cosmos_database and self.cosmos_container_name:
+            try:
+                self.cosmos_client = CosmosClient(self.cosmos_endpoint, {'masterKey': self.cosmos_key})
+                self.cosmos_container = self.cosmos_client.get_database_client(self.cosmos_database).get_container_client(self.cosmos_container_name)
+            except Exception as e:
+                print("Cosmos DB initialization error:", e)
+                self.cosmos_client = None
+                self.cosmos_container = None
+        else:
+            self.cosmos_client = None
+            self.cosmos_container = None
     
     def generate_response(
         self,
         query: str,
         context: List[Dict[str, Any]],
-        stream: bool = True
+        stream: bool = True,
+        system_prompt: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+        temperature: float = 0.2,
+        top_p: float = 0.95,
     ) -> Union[str, Generator[str, None, None]]:
         """
-        Generate a response to a query using the provided context.
-        
-        Args:
-            query: User query
-            context: List of retrieved documents to use as context
-            stream: Whether to stream the response
-            
-        Returns:
-            Generated response (string or generator for streaming)
+        Generate a response to *query* using retrieved *context*.
         """
-        # Format context for the prompt
+        history = history or self.conversation_history
+
+        # 1. Flatten the retrieved docs
         context_text = self._format_context(context)
-        
-        # Create the system message
-        system_message = {
-            "role": "system",
-            "content": (
-                "You are a helpful assistant that provides accurate information based on the context provided. "
-                "If the answer cannot be found in the context, say so. "
-                "Do not make up information. "
-                "Use the context to answer the user's question."
-            )
-        }
-        
-        # Create the user message with context
-        user_message = {
-            "role": "user",
-            "content": f"Context:\n{context_text}\n\nQuestion: {query}"
-        }
-        
-        # Prepare messages for the API call
-        messages = [system_message]
-        
-        # Add conversation history (limited to max_history)
-        for item in self.conversation_history[-self.max_history:]:
-            messages.append(item)
-        
-        # Add the current query
-        messages.append(user_message)
-        
+
+        # (optional) write to disk for debugging
+        with open("formatted_context.txt", "w") as fc:
+            fc.write(context_text)
+
+        # 2. Build the message list (new helper)
+        messages = self._build_messages(
+            query=query,
+            context_text=context_text,
+            history=history,
+            system_prompt=system_prompt,
+        )
+        # write messages to disk for debugging
+        with open("messages.txt", "w") as m:
+            for message in messages:
+                m.write(json.dumps(message) + "\n")
         try:
-            # Call the Azure OpenAI API
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=messages,
-                stream=stream
+                stream=stream,
+                temperature=temperature,
+                top_p=top_p,
             )
-            
-            # Process the response
+
             if stream:
                 return self._process_streaming_response(response, query, context)
-            else:
-                return self._process_complete_response(response, query, context)
-                
+            return self._process_complete_response(response, query, context)
+
         except Exception as e:
-            # Record error
             self._record_progress({
                 "operation": "generate_response",
                 "query": query,
@@ -132,7 +136,6 @@ class RAGManager:
                 "status": "failed",
                 "error": str(e)
             })
-            
             raise
     
     def _format_context(self, context: List[Dict[str, Any]]) -> str:
@@ -150,43 +153,49 @@ class RAGManager:
         for i, doc in enumerate(context):
             # Extract relevant fields
             doc_id = doc.get("id", f"Document {i+1}")
-            content = []
+            content_lines = []
             
             # Add plan name and state if available
             if "plan_name" in doc:
-                content.append(f"Plan: {doc['plan_name']}")
+                content_lines.append(f"Plan: {doc['plan_name']}")
             if "state" in doc:
-                content.append(f"State: {doc['state']}")
+                content_lines.append(f"State: {doc['state']}")
             
-            # Add Q&A data if available
+            # Include full content if available
+            if "content" in doc and doc["content"]:
+                content_lines.append(f"Content: {doc['content']}")
+            
+            # Include Q&A information if available
             if "qa_data" in doc and doc["qa_data"]:
-                content.append("Q&A Information:")
-                for qa in doc["qa_data"]:
-                    if "question" in qa and "answer" in qa:
-                        content.append(f"Q: {qa['question']}")
-                        content.append(f"A: {qa['answer']}")
+                content_lines.append("Q&A Information:")
+                content_lines.append(doc["qa_data"])
             
             # Add medical events data if available
             if "medical_events_data" in doc and doc["medical_events_data"]:
-                content.append("Medical Events Information:")
+                content_lines.append("Medical Events Information:")
                 for event in doc["medical_events_data"]:
                     if "common_medical_event" in event:
-                        content.append(f"Event: {event['common_medical_event']}")
+                        content_lines.append(f"Event: {event['common_medical_event']}")
                     if "services_you_may_need" in event:
-                        content.append(f"Services: {event['services_you_may_need']}")
+                        content_lines.append(f"Services: {event['services_you_may_need']}")
                     if "what_you_will_pay" in event:
-                        content.append(f"Cost: {event['what_you_will_pay']}")
+                        content_lines.append(f"Cost: {event['what_you_will_pay']}")
             
             # Add excluded services if available
             if "excluded_services" in doc and doc["excluded_services"]:
-                content.append(f"Excluded Services: {doc['excluded_services']}")
+                content_lines.append(f"Excluded Services: {doc['excluded_services']}")
             
             # Add other covered services if available
             if "other_covered_services" in doc and doc["other_covered_services"]:
-                content.append(f"Other Covered Services: {doc['other_covered_services']}")
+                content_lines.append(f"Other Covered Services: {doc['other_covered_services']}")
             
             # Add the formatted document to the context
-            formatted_context.append(f"--- Document {i+1} ({doc_id}) ---\n" + "\n".join(content))
+            formatted_context.append(f"--- Document {i+1} ({doc_id}) ---\n" + "\n".join(content_lines))
+        
+        #write formatted context to file
+        with open("formatted_context.txt", "w") as f:
+            for line in formatted_context:
+                f.write(line + "\n")
         
         return "\n\n".join(formatted_context)
     
@@ -208,12 +217,19 @@ class RAGManager:
             Generator yielding response chunks
         """
         full_response = ""
-        
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 full_response += content
-                yield content
+                # Format the response as a JSON object with the content and citations
+                yield json.dumps({
+                    "response": content,
+                    "citations": [{
+                        "document": doc.get("id", f"Document {i+1}"), 
+                        "content": doc.get("content", ""),
+                        "score": doc.get("@search.score", 0.0)  # Include the matching score
+                    } for i, doc in enumerate(context)]
+                }) + "\n"
         
         # Update conversation history
         self._update_conversation_history(query, full_response)
@@ -263,27 +279,66 @@ class RAGManager:
         
         return "No response generated"
     
-    def _update_conversation_history(self, query: str, response: str) -> None:
+    def _update_conversation_history(self, query: str, response: str, session_id: Optional[str] = None) -> None:
         """
-        Update the conversation history.
+        Update the conversation history and store the conversation record in Cosmos DB.
         
         Args:
             query: User query
             response: Assistant response
+            session_id: Optional session identifier
         """
-        # Add the query and response to the history
+        # Add exchange to in-memory history
         self.conversation_history.append({"role": "user", "content": query})
         self.conversation_history.append({"role": "assistant", "content": response})
         
-        # Trim the history if it exceeds the maximum
-        if len(self.conversation_history) > self.max_history * 2:  # * 2 because each exchange has 2 messages
+        # Trim history if it exceeds the maximum
+        if len(self.conversation_history) > self.max_history * 2:
             self.conversation_history = self.conversation_history[-self.max_history * 2:]
+        
+        # Create a conversation record, including session_id if provided
+        conversation_record = {
+            "id": str(uuid.uuid4()),
+            "session_id": session_id if session_id is not None else str(uuid.uuid4()),
+            "query": query,
+            "response": response,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Store conversation record in Cosmos DB if available
+        if self.cosmos_container:
+            try:
+                self.cosmos_container.create_item(body=conversation_record)
+            except Exception as e:
+                print("Error storing conversation in Cosmos DB:", e)
     
     def clear_history(self) -> None:
         """
         Clear the conversation history.
         """
         self.conversation_history = []
+    
+    def _build_messages(
+        self,
+        query: str,
+        context_text: str,
+        history: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        # Updated base_prompt to require citations in the answer
+        print(f"system_prompt is: {system_prompt}")
+        base_prompt = system_prompt or (
+            "You are a helpful assistant that answers questions about insurance plans using the provided Context. "
+            "Answer the question ONLY with information from the Context. If the answer is not present, say 'I don't know.' "
+            "Include citations in your answer by referencing the document numbers and plan names from the Context."
+        )
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": base_prompt},
+            {"role": "system", "name": "context", "content": context_text},
+        ]
+        messages.extend(history[-self.max_history * 2 :])
+        messages.append({"role": "user", "content": query})
+        return messages
     
     def _record_progress(self, record: Dict[str, Any]) -> None:
         """
@@ -323,4 +378,24 @@ class RAGManager:
             Last operation record or None
         """
         records = self.get_progress()
-        return records[-1] if records else None 
+        return records[-1] if records else None
+    
+    def get_embedding(self, text: str) -> List[float]:
+        """
+        Get embedding for text using Azure OpenAI.
+        
+        Args:
+            text: Text to get embedding for
+            
+        Returns:
+            List of floats representing the embedding
+        """
+        try:
+            response = self.client.embeddings.create(
+                model=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
+                input=text
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            print(f"Error getting embedding: {str(e)}")
+            return []
