@@ -24,6 +24,8 @@ from azure.storage.blob import BlobServiceClient
 import re
 import uuid
 import time
+import pdfplumber  # Add this import for PDF text extraction
+import io
 
 # Load environment variables
 load_dotenv()
@@ -215,6 +217,7 @@ class SearchManager:
         select_fields: Optional[List[str]] = None,
         scoring_profile: Optional[str] = "basic",  # Default scoring profile
         semantic_configuration_name: Optional[str] = "basic",  # Default semantic configuration
+        plan_name_filter: Optional[str] = None,  # New parameter for filtering by plan_name
         **kwargs
     ) -> List[Dict[str, Any]]:
         """
@@ -228,6 +231,7 @@ class SearchManager:
             select_fields: List of fields to retrieve in the results. Defaults to None (all fields).
             scoring_profile: Scoring profile to use for ranking results. Defaults to "basic-profile".
             semantic_configuration_name: Semantic configuration to use for semantic or hybrid search. Defaults to "basic-profile".
+            plan_name_filter: Optional filter value for the plan_name field.
             **kwargs: Additional search parameters.
 
         Returns:
@@ -255,6 +259,12 @@ class SearchManager:
             raise ValueError(f"Unsupported search_type: {search_type}")
 
         # Build search parameters
+        if select_fields:
+            if "content" not in select_fields:
+                select_fields.append("content")  # Ensure 'content' is included
+        else:
+            select_fields = ["content"]  # Default to include 'content'
+
         search_parameters = {
             "query_type": query_type,
             "top": top,
@@ -262,12 +272,21 @@ class SearchManager:
             "scoring_profile": scoring_profile,
             **kwargs
         }
+        # Add plan_name filter if provided
+        if plan_name_filter:
+            # If a filter already exists, append with 'and'. Otherwise, simply add one.
+            existing_filter = search_parameters.get("filter", "")
+            plan_filter = f"plan_name eq '{plan_name_filter}'"
+            if existing_filter:
+                search_parameters["filter"] = f"{existing_filter} and {plan_filter}"
+            else:
+                search_parameters["filter"] = plan_filter
 
         try:
             # Perform the search
             results = search_client.search(query, **search_parameters)
             results_list = [dict(result) for result in results]
-            print(f"Search results: {json.dumps(results_list, indent=4)}")
+           # print(f"Search results: {json.dumps(results_list, indent=4)}")
             return results_list
         except Exception as e:
             print(f"Error during search: {str(e)}")
@@ -332,11 +351,15 @@ class SearchManager:
             for file_name in files_to_index:
                 try:
                     file_blob_client = container_client.get_blob_client(file_name)
-                    file_content = file_blob_client.download_blob().readall().decode("utf-8", errors="ignore")
+                    file_content = file_blob_client.download_blob().readall()
 
-                    # Chunk the file content
-                    for i in range(0, len(file_content), chunk_size):
-                        chunk = file_content[i:i + chunk_size]
+                    # Extract text from PDF
+                    with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+                        extracted_text = "\n".join(page.extract_text() for page in pdf.pages if page.extract_text())
+
+                    # Chunk the extracted text
+                    for i in range(0, len(extracted_text), chunk_size):
+                        chunk = extracted_text[i:i + chunk_size]
                         chunk_id = f"{uuid.uuid4()}_{os.path.splitext(file_name)[0]}"
                         document = {
                             "chunk_id": chunk_id,

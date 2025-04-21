@@ -7,15 +7,40 @@ using the BlobManager class.
 
 import os
 import json
-import re  # Add this import for regex matching
+import re
+import time
+import pdfplumber
+import logging
+import warnings  # Add this import to suppress warnings
+import sys
+import contextlib  # Add this import for suppressing stderr
+import base64  # Add this import for Base64 encoding
+from datetime import datetime  # Add this import for datetime conversion
 from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ResourceNotFoundError
 from dotenv import load_dotenv
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import SearchIndex, SimpleField, SearchableField
 from azure.core.credentials import AzureKeyCredential
 from HEALRAG.search_manager import SearchManager
+
+# Suppress pdfplumber warnings
+logging.getLogger("pdfplumber").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=UserWarning, module="pdfplumber")
+
+@contextlib.contextmanager
+def suppress_stderr():
+    """
+    Context manager to suppress standard error output.
+    """
+    with open(os.devnull, "w") as devnull:
+        old_stderr = sys.stderr
+        try:
+            sys.stderr = devnull
+            yield
+        finally:
+            sys.stderr = old_stderr
 
 class RAGPipeline:
     def __init__(self):
@@ -25,6 +50,9 @@ class RAGPipeline:
         self.azure_storage_connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
         self.blob_container_name = os.getenv("BLOB_CONTAINER_NAME")
         self.data_dir = os.getenv("DATA_DIR", "data")
+
+        # Track a single sample JSON when INDEXING_SAMPLE is enabled
+        self.sample_json_file: Optional[str] = None
 
         # Initialize Blob Service Client
         self.blob_service_client = BlobServiceClient.from_connection_string(self.azure_storage_connection_string)
@@ -71,49 +99,32 @@ class RAGPipeline:
         Writes the file_mapping to a JSON file.
         """
         field_input_pattern = re.compile(r"^SBC_\d{4,6}\.json$")
-        file_mapping = []
+        file_mapping: List[Dict[str, Any]] = []
 
         # Iterate through files in the data directory
         for root, _, files in os.walk(self.data_dir):
-            json_files = [f for f in files if field_input_pattern.match(f)]  # Match JSON files
+            json_files = [f for f in files if field_input_pattern.match(f)]
             for json_file in json_files:
-                # Extract the numeric part from the JSON file name
                 match = re.search(r"_(\d{4,6})\.json$", json_file)
                 if not match:
                     continue
                 number = match.group(1)
-
-                # Find corresponding PDF files with the same number
-                pdf_files = [
-                    f for f in files if f.endswith(".pdf") and f"_{number}" in f
-                ]
-
-                # Add to file_mapping
+                pdf_files = [f for f in files if f.endswith(".pdf") and f"_{number}" in f]
                 file_mapping.append({
                     "field_key_file": json_file,
                     "files_to_be_indexed": pdf_files
                 })
 
-        # Write the file_mapping to a JSON file
         output_file = os.path.join(self.data_dir, "file_mapping.json")
         with open(output_file, "w") as f:
             json.dump(file_mapping, f, indent=4)
         print(f"File mapping written to {output_file}")
 
     def generate_fields_from_json(self, json_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Generate fields for an index based on the structure of the JSON data.
-        
-        Args:
-            json_data: The JSON data to process.
-        
-        Returns:
-            A list of field definitions for the index.
-        """
-        fields = []
-        field_names = set()  # Track field names to avoid duplicates
+        fields: List[Dict[str, Any]] = []
+        field_names = set()
 
-        # Ensure 'chunk_id' is always included as the key field
+        # Key field
         fields.append({
             "name": "chunk_id",
             "type": "Edm.String",
@@ -121,11 +132,11 @@ class RAGPipeline:
             "filterable": True,
             "sortable": True,
             "facetable": False,
-            "key": True  # Set 'chunk_id' as the key field
+            "key": True
         })
         field_names.add("chunk_id")
 
-        # Ensure 'parent_id' is included and set to the filename
+        # Parent ID
         fields.append({
             "name": "parent_id",
             "type": "Edm.String",
@@ -139,99 +150,29 @@ class RAGPipeline:
 
         for key, value in json_data.items():
             if key in field_names:
-                continue  # Skip duplicate fields
+                continue
             field_names.add(key)
 
+            entry: Dict[str, Any] = {"name": key, "searchable": True, "filterable": False, "sortable": False, "facetable": False, "key": False}
             if key in ["creation_date", "last_modified_date"]:
-                # Ensure these fields are always Edm.DateTimeOffset
-                fields.append({
-                    "name": key,
-                    "type": "Edm.DateTimeOffset",
-                    "searchable": False,
-                    "filterable": True,
-                    "sortable": True,
-                    "facetable": False,
-                    "key": False
-                })
-            elif isinstance(value, list):
-                fields.append({
-                    "name": key,
-                    "type": "Edm.String",
-                    "searchable": True,
-                    "filterable": True,
-                    "sortable": False,
-                    "facetable": False,
-                    "key": False
-                })
-            elif isinstance(value, str):
-                fields.append({
-                    "name": key,
-                    "type": "Edm.String",
-                    "searchable": True,
-                    "filterable": True,
-                    "sortable": True,
-                    "facetable": False,
-                    "key": False
-                })
+                entry.update({"type": "Edm.DateTimeOffset", "searchable": False, "filterable": True, "sortable": True})
             elif isinstance(value, (int, float)):
-                fields.append({
-                    "name": key,
-                    "type": "Edm.Double",
-                    "searchable": False,
-                    "filterable": True,
-                    "sortable": True,
-                    "facetable": True,
-                    "key": False
-                })
-            elif isinstance(value, dict):
-                fields.append({
-                    "name": key,
-                    "type": "Edm.String",
-                    "searchable": True,
-                    "filterable": True,
-                    "sortable": False,
-                    "facetable": False,
-                    "key": False
-                })
+                entry.update({"type": "Edm.Double", "searchable": False, "filterable": True, "sortable": True, "facetable": True})
             else:
-                fields.append({
-                    "name": key,
-                    "type": "Edm.String",
-                    "searchable": True,
-                    "filterable": True,
-                    "sortable": False,
-                    "facetable": False,
-                    "key": False
-                })
+                entry["type"] = "Edm.String"
+                entry.update({"searchable": True, "filterable": True})
+
+            fields.append(entry)
 
         return fields
 
     def index_creator(self, fields: List[Dict[str, Any]]) -> None:
-        """
-        Create a semantic index using the SearchManager.
-
-        Args:
-            fields: A list of field definitions for the index.
-        """
         print("Creating semantic index...")
         try:
-            # Debugging: Validate and print the fields structure
-            if not isinstance(fields, list) or not all(isinstance(field, dict) for field in fields):
-                raise ValueError("Fields must be a list of dictionaries.")
-            
-            print("Fields being passed to create_semantic_index:")
-            for field in fields:
-                print(json.dumps(field, indent=4))  # Pretty-print each field for clarity
-
-            # Verify SearchManager instance and method
-            search_manager = SearchManager()
-            if not hasattr(search_manager, "create_semantic_index"):
-                raise AttributeError("SearchManager does not have a 'create_semantic_index' method.")
-            if not callable(search_manager.create_semantic_index):
-                raise TypeError("'create_semantic_index' is not callable.")
-
-            # Pass fields to create_semantic_index
-            search_manager.create_semantic_index(fields)
+            # Debug fields
+            print(json.dumps(fields, indent=4))
+            manager = SearchManager()
+            manager.create_semantic_index(fields)
             print("Semantic index created successfully.")
         except Exception as e:
             print(f"Failed to create semantic index: {e}")
@@ -239,9 +180,7 @@ class RAGPipeline:
     def populate_insurance_index(self) -> None:
         """
         Populate the insurance index by calling the semantic_index_populator function
-        from the SearchManager class.
-
-        Uses the file_mapping generated by generate_file_mapping.
+        from the SearchManager class, optionally filtering to one sample JSON.
         """
         # Generate the file mapping
         self.generate_file_mapping()
@@ -251,73 +190,166 @@ class RAGPipeline:
         try:
             with open(file_mapping_path, "r") as f:
                 file_mapping = json.load(f)
+            print(f"File mapping loaded: {json.dumps(file_mapping, indent=4)}")
         except Exception as e:
-            print(f"Failed to read file_mapping from {file_mapping_path}: {e}")
+            print(f"Failed to read file_mapping: {e}")
             return
 
-        # Get container name from environment variables
-        container_name = self.blob_container_name
-        if not container_name:
-            print("BLOB_CONTAINER_NAME is not set in the environment variables.")
-            return
-
-        # Initialize SearchManager
-        search_manager = SearchManager()
+        # If sampling, keep only the chosen JSON mapping
+        if self.sample_json_file:
+            file_mapping = [m for m in file_mapping if m["field_key_file"] == self.sample_json_file]
+            if not file_mapping:
+                print(f"No mapping for sample JSON '{self.sample_json_file}'")
+                return
 
         # Call semantic_index_populator
+        manager = SearchManager()
         try:
-            search_manager.semantic_index_populator(
+            manager.semantic_index_populator(
                 field_input=r"^SBC_\d{4,6}\.json$",
-                container_name=container_name,
+                container_name=self.blob_container_name,
                 file_mapping=file_mapping
             )
             print("Insurance index populated successfully.")
         except Exception as e:
             print(f"Failed to populate insurance index: {e}")
 
+    def chunk_text(self, text: str, chunk_size: int = 1000) -> List[str]:
+        return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+
     def run(self):
+        # Upload files before indexing
+        self.upload_files_to_blob()
+
         print(f"Uploading files from '{self.data_dir}' to Azure Blob Storage...")
-        # try:
-        #     self.upload_files_to_blob()
-        #     print("File upload process completed.")
-        # except Exception as e:
-        #     print(f"An error occurred during the upload process: {e}")
+        indexing_sample = os.getenv("INDEXING_SAMPLE", "False").lower() == "true"
 
-        # Aggregate outer keys from all JSON files in the data directory
+        if indexing_sample:
+            print("INDEXING_SAMPLE is enabled. Processing only one JSON and its PDFs.")
+            processed = False
+            for root, _, files in os.walk(self.data_dir):
+                if processed:
+                    break
+                for fname in files:
+                    if fname.endswith(".json"):
+                        print(f"Processing file: {fname}")
+                        self.sample_json_file = fname
+                        self.process_json_and_pdfs(root, fname, files)
+                        processed = True
+                        break
+        else:
+            print("INDEXING_SAMPLE is disabled. Processing all files one by one.")
+            for root, _, files in os.walk(self.data_dir):
+                for fname in files:
+                    if fname.endswith(".json"):
+                        print(f"Processing file: {fname}")
+                        self.process_json_and_pdfs(root, fname, files)
+
+    def process_json_and_pdfs(self, root: str, json_file: str, files: List[str]) -> None:
+        """
+        Process a single JSON file and its corresponding PDFs.
+
+        Args:
+            root: The root directory of the files.
+            json_file: The JSON file to process.
+            files: The list of files in the directory.
+        """
         aggregated_keys = {}
-        for root, _, files in os.walk(self.data_dir):
-            for file_name in files:
-                if file_name.endswith(".json"):
-                    file_path = os.path.join(root, file_name)
-                    try:
-                        with open(file_path, "r") as json_file:
-                            json_data = json.load(json_file)
-                            if isinstance(json_data, dict):
-                                aggregated_keys.update(json_data)
-                                # Add metadata fields
-                                aggregated_keys["filename"] = file_name
-                                aggregated_keys["parent_id"] = file_name  # Set parent_id to the filename
-                                aggregated_keys["content"] = json.dumps(json_data)
-                                aggregated_keys["creation_date"] = os.path.getctime(file_path)
-                                aggregated_keys["last_modified_date"] = os.path.getmtime(file_path)
-                                aggregated_keys["file_size"] = os.path.getsize(file_path)
-                                aggregated_keys["file_path"] = file_path
-                    except Exception as e:
-                        print(f"Failed to process JSON file '{file_name}': {e}")
+        json_path = os.path.join(root, json_file)
 
-        # Generate fields from the aggregated keys
-        fields = self.generate_fields_from_json(aggregated_keys)
-        print("Generated fields for index:")
-        # Write the fields to a JSON file
-        with open("fields.json", "w") as f:
-            json.dump(fields, f, indent=4)
+        try:
+            # Load JSON data
+            with open(json_path, "r") as jf:
+                data = json.load(jf)
+                aggregated_keys.update(data)
+                aggregated_keys.update({
+                    "filename": json_file,
+                    "parent_id": json_file,
+                    "creation_date": datetime.utcfromtimestamp(os.path.getctime(json_path)).isoformat() + "Z",
+                    "last_modified_date": datetime.utcfromtimestamp(os.path.getmtime(json_path)).isoformat() + "Z",
+                    "file_size": os.path.getsize(json_path),
+                    "file_path": json_path
+                })
+            print(f"JSON file '{json_file}' processed successfully.")
 
-        # Create the semantic index
-        self.index_creator(fields)
+            # Find corresponding PDFs
+            match = re.search(r"_(\d{4,6})\.json$", json_file)
+            if not match:
+                print(f"Could not extract number from JSON file '{json_file}'. Skipping.")
+                return
+            number = match.group(1)
+            pdf_files = [f for f in files if f.endswith(".pdf") and f"_{number}" in f]
 
-        # Populate the insurance index
-        self.populate_insurance_index()
+            # Process each PDF
+            ndjson_data = []
+            for pdf_file in pdf_files:
+                pdf_path = os.path.join(root, pdf_file)
+                print(f"Starting text extraction for PDF: {pdf_file}")
+                with suppress_stderr():
+                    with pdfplumber.open(pdf_path) as pdf:
+                        text = "\n".join(p.extract_text() for p in pdf.pages if p.extract_text())
+                print(f"Text extraction completed for PDF: {pdf_file}")
+
+                # Add PDF metadata
+                aggregated_keys.update({
+                    "content": text,
+                    "filename": pdf_file,
+                    "parent_id": pdf_file,
+                    "creation_date": datetime.utcfromtimestamp(os.path.getctime(pdf_path)).isoformat() + "Z",
+                    "last_modified_date": datetime.utcfromtimestamp(os.path.getmtime(pdf_path)).isoformat() + "Z",
+                    "file_size": os.path.getsize(pdf_path),
+                    "file_path": pdf_path
+                })
+
+                # Chunk the extracted text
+                if "content" in aggregated_keys:
+                    chunks = self.chunk_text(aggregated_keys["content"])
+                    print(f"Text chunked into {len(chunks)} parts for PDF: {pdf_file}")
+
+                    # Log each chunk as a separate document in NDJSON
+                    for idx, chunk in enumerate(chunks):
+                        # Encode chunk_id using URL-safe Base64
+                        chunk_id = base64.urlsafe_b64encode(f"{pdf_file}_chunk_{idx + 1}".encode()).decode()
+                        ndjson_data.append({
+                            "chunk_id": chunk_id,
+                            "content": chunk,
+                            "parent_id": pdf_file,
+                            "sob_file": json.dumps(data.get("sob_file")) if isinstance(data.get("sob_file"), (list, dict)) else data.get("sob_file"),
+                            "sbc_file": json.dumps(data.get("sbc_file")) if isinstance(data.get("sbc_file"), (list, dict)) else data.get("sbc_file"),
+                            "plan_name": json.dumps(data.get("plan_name")) if isinstance(data.get("plan_name"), (list, dict)) else data.get("plan_name"),
+                            "state": json.dumps(data.get("state")) if isinstance(data.get("state"), (list, dict)) else data.get("state"),
+                            "qa_data": json.dumps(data.get("qa_data")) if isinstance(data.get("qa_data"), (list, dict)) else data.get("qa_data"),
+                            "medical_events_data": json.dumps(data.get("medical_events_data")) if isinstance(data.get("medical_events_data"), (list, dict)) else data.get("medical_events_data"),
+                            "excluded_services": json.dumps(data.get("excluded_services")) if isinstance(data.get("excluded_services"), (list, dict)) else data.get("excluded_services"),
+                            "other_covered_services": json.dumps(data.get("other_covered_services")) if isinstance(data.get("other_covered_services"), (list, dict)) else data.get("other_covered_services"),
+                            "filename": pdf_file,
+                            "creation_date": datetime.utcfromtimestamp(os.path.getctime(pdf_path)).isoformat() + "Z",
+                            "last_modified_date": datetime.utcfromtimestamp(os.path.getmtime(pdf_path)).isoformat() + "Z",
+                            "file_size": os.path.getsize(pdf_path),
+                            "file_path": pdf_path
+                        })
+
+            # Append NDJSON data to the single tracker file
+            ndjson_tracker_path = os.path.join(os.getcwd(), "ndjson_indexing_tracker.ndjson")
+            with open(ndjson_tracker_path, "a") as ndjson_file:
+                for entry in ndjson_data:
+                    ndjson_file.write(json.dumps(entry) + "\n")
+            print(f"NDJSON tracker updated: {ndjson_tracker_path}")
+
+            # Generate fields and index the data
+            print(f"Generated fields for JSON '{json_file}' and PDFs: {pdf_files}")
+            fields = self.generate_fields_from_json(aggregated_keys)
+            self.index_creator(fields)
+
+            # Index documents in Azure Cognitive Search
+            manager = SearchManager()
+            manager.upload_documents(ndjson_data)
+            print(f"Documents indexed successfully for JSON '{json_file}' and PDFs: {pdf_files}")
+            time.sleep(10)
+
+        except Exception as ex:
+            print(f"Error processing JSON '{json_file}' and its PDFs: {ex}")
 
 if __name__ == "__main__":
     pipeline = RAGPipeline()
-    pipeline.run()  # Populate the insurance index
+    pipeline.run()
