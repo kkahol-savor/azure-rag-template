@@ -8,6 +8,7 @@ the API endpoints for the RAG pipeline.
 
 import os
 import sys
+import json
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -91,6 +92,10 @@ async def root(request: Request):
         Rendered HTML template
     """
     return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    return templates.TemplateResponse("settings.html", {"request": request})
 
 # Optional: API-specific endpoint (merged from api.py)
 @app.get("/api")
@@ -186,25 +191,22 @@ async def query_stream(request: QueryRequest):
             top_p=request.top_p                          # pass the top_p value
         )
         
-        async def stream_generator():
-            full_response = ""
-            for chunk in response_generator:
-                full_response += chunk
-                yield f"data: {chunk}\n\n"
-            
-            # Store the session
-            active_sessions[session_id] = {
-                "query": request.query,
-                "response": full_response,
-                "timestamp": datetime.now().isoformat()
-            }
+        async def format_stream():
+            try:
+                async for chunk in response_generator:
+                    if isinstance(chunk, dict):
+                        yield f"{json.dumps(chunk)}\n"
+                    else:
+                        yield f"{json.dumps({'response': chunk})}\n"
+            except Exception as e:
+                yield f"{json.dumps({'error': str(e)})}\n"
         
         return StreamingResponse(
-            stream_generator(),
+            format_stream(),
             media_type="text/event-stream"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"error": str(e)}
 
 @app.get("/api/conversations/{session_id}")
 async def get_conversation(session_id: str):

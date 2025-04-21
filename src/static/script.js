@@ -9,6 +9,14 @@ const citationContent = document.getElementById('citation-content');
 const historyPanel = document.querySelector('.history-panel');
 const toggleHistoryBtn = document.getElementById('toggle-history-btn');
 const historyList = document.getElementById('history-list');
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const closeSettingsBtn = document.getElementById('close-settings-btn');
+const settingsForm = document.getElementById('settings-form');
+const temperatureInput = document.getElementById('temperature');
+const temperatureValue = document.getElementById('temperature-value');
+const topPInput = document.getElementById('top-p');
+const topPValue = document.getElementById('top-p-value');
 
 // State
 let currentSessionId = null;
@@ -16,15 +24,67 @@ let currentCitations = [];
 let conversationHistory = [];
 
 // Event Listeners
-submitBtn.addEventListener('click', handleSubmit);
-queryInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        handleSubmit();
-    }
+document.addEventListener('DOMContentLoaded', () => {
+    submitBtn.addEventListener('click', handleSubmit);
+    queryInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            handleSubmit();
+        }
+    });
+    closeCitationBtn.addEventListener('click', closeCitationPanel);
+    clearSessionBtn.addEventListener('click', clearCurrentSession);
+    toggleHistoryBtn.addEventListener('click', toggleHistoryPanel);
+    settingsBtn.addEventListener('click', openSettingsModal);
+    closeSettingsBtn.addEventListener('click', closeSettingsModal);
+    settingsForm.addEventListener('submit', saveSettings);
+    temperatureInput.addEventListener('input', () => updateRangeValue(temperatureInput, temperatureValue));
+    topPInput.addEventListener('input', () => updateRangeValue(topPInput, topPValue));
+
+    // Close modal when clicking outside
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) {
+            closeSettingsModal();
+        }
+    });
 });
-closeCitationBtn.addEventListener('click', closeCitationPanel);
-clearSessionBtn.addEventListener('click', clearCurrentSession);
-toggleHistoryBtn.addEventListener('click', toggleHistoryPanel);
+
+// Settings Functions
+function openSettingsModal() {
+    settingsModal.classList.add('active');
+    loadSettings();
+}
+
+function closeSettingsModal() {
+    settingsModal.classList.remove('active');
+}
+
+function loadSettings() {
+    const settings = JSON.parse(localStorage.getItem('healrag_settings') || '{}');
+    
+    document.getElementById('plan-name-filter').value = settings.plan_name_filter || '';
+    temperatureInput.value = settings.temperature || 0.7;
+    temperatureValue.textContent = settings.temperature || 0.7;
+    topPInput.value = settings.top_p || 0.9;
+    topPValue.textContent = settings.top_p || 0.9;
+}
+
+function saveSettings(event) {
+    event.preventDefault();
+    
+    const settings = {
+        plan_name_filter: document.getElementById('plan-name-filter').value,
+        temperature: parseFloat(temperatureInput.value),
+        top_p: parseFloat(topPInput.value)
+    };
+    
+    localStorage.setItem('healrag_settings', JSON.stringify(settings));
+    closeSettingsModal();
+    alert('Settings saved successfully!');
+}
+
+function updateRangeValue(input, valueElement) {
+    valueElement.textContent = input.value;
+}
 
 // Functions
 async function handleSubmit() {
@@ -35,14 +95,25 @@ async function handleSubmit() {
     setLoadingState(true);
 
     try {
-        const response = await fetch('/api/query', {
+        // Get current settings
+        const settings = JSON.parse(localStorage.getItem('healrag_settings') || '{}');
+        
+        // Generate session ID if not exists
+        if (!currentSessionId) {
+            currentSessionId = crypto.randomUUID();
+        }
+
+        const response = await fetch('/api/query/stream', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ 
                 query,
-                session_id: currentSessionId
+                session_id: currentSessionId,
+                plan_name_filter: settings.plan_name_filter,
+                temperature: settings.temperature,
+                top_p: settings.top_p
             }),
         });
 
@@ -50,14 +121,48 @@ async function handleSubmit() {
             throw new Error('Network response was not ok');
         }
 
-        const data = await response.json();
+        // Clear previous response
+        responseText.innerHTML = '';
         
-        // Update session ID if this is a new session
-        if (!currentSessionId && data.session_id) {
-            currentSessionId = data.session_id;
+        // Handle streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            
+            // Process complete JSON objects from the buffer
+            let startIndex = 0;
+            let endIndex;
+            
+            while ((endIndex = buffer.indexOf('\n', startIndex)) !== -1) {
+                try {
+                    const jsonStr = buffer.substring(startIndex, endIndex).trim();
+                    if (jsonStr) {
+                        const data = JSON.parse(jsonStr);
+                        if (data.response) {
+                            responseText.innerHTML += data.response;
+                            // Scroll to bottom of response
+                            responseText.scrollTop = responseText.scrollHeight;
+                        }
+                        if (data.citations) {
+                            currentCitations = data.citations;
+                        }
+                    }
+                    startIndex = endIndex + 1;
+                } catch (e) {
+                    console.error('Error parsing JSON:', e);
+                    break;
+                }
+            }
+            
+            buffer = buffer.substring(startIndex);
         }
         
-        displayResponse(data);
         await loadConversationHistory();
     } catch (error) {
         console.error('Error:', error);

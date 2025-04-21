@@ -217,13 +217,12 @@ class RAGManager:
             Generator yielding response chunks
         """
         full_response = ""
-       # print("the response in rag_manager.process_streaming_response is: ")  
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
-                #print(content, end="", flush=True)  # Print the content as it arrives
                 full_response += content
-                yield content
+                # Format the response as a JSON object with the content
+                yield json.dumps({"response": content}) + "\n"
         
         # Update conversation history
         self._update_conversation_history(query, full_response)
