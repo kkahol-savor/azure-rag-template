@@ -11,6 +11,8 @@ from typing import List, Dict, Any, Optional, Generator, Tuple, Union
 from datetime import datetime
 from openai import AzureOpenAI
 from dotenv import load_dotenv
+import uuid
+from azure.cosmos import CosmosClient
 
 # Load environment variables
 load_dotenv()
@@ -18,7 +20,7 @@ load_dotenv()
 # Azure OpenAI configuration
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
-AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "10"))
 PROGRESS_FILE = os.getenv("RAG_PROGRESS_FILE", "rag_progress.ndjson")
@@ -62,6 +64,23 @@ class RAGManager:
         )
         
         self.conversation_history = []
+        
+        # Initialize Cosmos DB client and container using environment variables
+        self.cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
+        self.cosmos_key = os.getenv("COSMOS_KEY")
+        self.cosmos_database = os.getenv("COSMOS_DATABASE")
+        self.cosmos_container_name = os.getenv("COSMOS_CONTAINER")
+        if self.cosmos_endpoint and self.cosmos_key and self.cosmos_database and self.cosmos_container_name:
+            try:
+                self.cosmos_client = CosmosClient(self.cosmos_endpoint, {'masterKey': self.cosmos_key})
+                self.cosmos_container = self.cosmos_client.get_database_client(self.cosmos_database).get_container_client(self.cosmos_container_name)
+            except Exception as e:
+                print("Cosmos DB initialization error:", e)
+                self.cosmos_client = None
+                self.cosmos_container = None
+        else:
+            self.cosmos_client = None
+            self.cosmos_container = None
     
     def generate_response(
         self,
@@ -254,21 +273,38 @@ class RAGManager:
         
         return "No response generated"
     
-    def _update_conversation_history(self, query: str, response: str) -> None:
+    def _update_conversation_history(self, query: str, response: str, session_id: Optional[str] = None) -> None:
         """
-        Update the conversation history.
+        Update the conversation history and store the conversation record in Cosmos DB.
         
         Args:
             query: User query
             response: Assistant response
+            session_id: Optional session identifier
         """
-        # Add the query and response to the history
+        # Add exchange to in-memory history
         self.conversation_history.append({"role": "user", "content": query})
         self.conversation_history.append({"role": "assistant", "content": response})
         
-        # Trim the history if it exceeds the maximum
-        if len(self.conversation_history) > self.max_history * 2:  # * 2 because each exchange has 2 messages
+        # Trim history if it exceeds the maximum
+        if len(self.conversation_history) > self.max_history * 2:
             self.conversation_history = self.conversation_history[-self.max_history * 2:]
+        
+        # Create a conversation record, including session_id if provided
+        conversation_record = {
+            "id": str(uuid.uuid4()),
+            "session_id": session_id if session_id is not None else str(uuid.uuid4()),
+            "query": query,
+            "response": response,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Store conversation record in Cosmos DB if available
+        if self.cosmos_container:
+            try:
+                self.cosmos_container.create_item(body=conversation_record)
+            except Exception as e:
+                print("Error storing conversation in Cosmos DB:", e)
     
     def clear_history(self) -> None:
         """

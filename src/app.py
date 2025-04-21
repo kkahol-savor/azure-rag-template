@@ -22,7 +22,7 @@ from datetime import datetime
 # Add the src directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.RAG_CREATION import RAGCreation
+from insurance_rag import InsuranceRAG
 
 # Load environment variables
 load_dotenv()
@@ -48,9 +48,6 @@ app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
 # Set up templates
 templates = Jinja2Templates(directory="src/templates")
-
-# Initialize RAG creation
-rag = RAGCreation()
 
 # Pydantic models for request and response
 class QueryRequest(BaseModel):
@@ -96,7 +93,8 @@ async def setup_pipeline(request: SetupRequest):
         Setup results
     """
     try:
-        result = rag.setup_rag_pipeline(request.data_dir)
+        ir = InsuranceRAG()
+        result = ir.setup_rag_pipeline(request.data_dir)
         return {
             "status": "success",
             "message": "RAG pipeline setup complete",
@@ -120,18 +118,15 @@ async def query(request: QueryRequest):
         # Generate session ID if not provided
         session_id = request.session_id or str(uuid.uuid4())
         
-        # Process the query
-        response = rag.query_rag(request.query, stream=False, save_conversation=True)
-        
-        # Try to get the conversation from the database
-        conversation = rag.healrag.db_manager.get_conversation(session_id)
+        # Instantiate InsuranceRAG and process the query
+        ir = InsuranceRAG()
+        response = ir.perform_rag(request.query, stream=False)
         
         # Store the session
         active_sessions[session_id] = {
             "query": request.query,
             "response": response,
-            "timestamp": datetime.now().isoformat(),
-            "conversation": conversation
+            "timestamp": datetime.now().isoformat()
         }
         
         return {
@@ -157,32 +152,25 @@ async def query_stream(request: QueryRequest):
         # Generate session ID if not provided
         session_id = request.session_id or str(uuid.uuid4())
         
-        # Create a generator for the streaming response
-        async def response_generator():
-            # Collect the full response
+        # Instantiate InsuranceRAG and create a generator for the streaming response
+        ir = InsuranceRAG()
+        response_generator = ir.perform_rag(request.query, stream=True)
+        
+        async def stream_generator():
             full_response = ""
-            
-            # Process the query with streaming
-            for chunk in rag.query_rag(request.query, stream=True, save_conversation=False):
+            for chunk in response_generator:
                 full_response += chunk
                 yield f"data: {chunk}\n\n"
             
-            # Save the conversation after streaming is complete
-            conversation = {
-                "id": session_id,
+            # Store the session
+            active_sessions[session_id] = {
                 "query": request.query,
                 "response": full_response,
-                "timestamp": rag.healrag.db_manager.get_conversation(session_id)
+                "timestamp": datetime.now().isoformat()
             }
-            
-            # Store the session
-            active_sessions[session_id] = conversation
-            
-            # Save the conversation
-            rag.healrag.save_conversation(conversation)
         
         return StreamingResponse(
-            response_generator(),
+            stream_generator(),
             media_type="text/event-stream"
         )
     except Exception as e:
@@ -204,17 +192,11 @@ async def get_conversation(session_id: str):
         if session_id in active_sessions:
             return active_sessions[session_id]
         
-        # Get the conversation from the database
-        conversation = rag.healrag.db_manager.get_conversation(session_id)
-        
-        if not conversation:
-            # Return a 404 response with a more descriptive message
-            return JSONResponse(
-                status_code=404,
-                content={"detail": f"Conversation with ID {session_id} not found"}
-            )
-        
-        return conversation
+        # Return a 404 response with a more descriptive message
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"Conversation with ID {session_id} not found"}
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -232,16 +214,11 @@ async def get_conversations(limit: int = 10):
         List of recent conversations
     """
     try:
-        # Get recent conversations from the database
-        conversations = rag.healrag.db_manager.query_items(
-            "SELECT TOP @limit * FROM c ORDER BY c.timestamp DESC",
-            parameters=[{"name": "@limit", "value": limit}]
-        )
-        
-        return conversations
+        # Return recent conversations from active sessions
+        return list(active_sessions.values())[:limit]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=8000)
