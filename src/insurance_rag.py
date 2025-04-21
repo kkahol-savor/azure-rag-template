@@ -1,6 +1,6 @@
 import os
-from insurance_search import InsuranceSearch  # Adjusted import
-from HEALRAG.rag_manager import RAGManager  # Adjusted import
+from .insurance_search import InsuranceSearch  # Adjusted import
+from .HEALRAG.rag_manager import RAGManager  # Adjusted import
 from dotenv import load_dotenv
 from collections import deque
 from typing import Optional
@@ -16,7 +16,8 @@ class InsuranceRAG:
         self.rag_manager = RAGManager()
         self.history = deque(maxlen=10)  # Maintain history of last 10 request-response pairs
 
-    def perform_rag(self, query: str, stream: bool = True, session_id: Optional[str] = None):  # Added session_id
+    def perform_rag(self, query: str, stream: bool = True, session_id: Optional[str] = None, 
+                    plan_name_filter: Optional[str] = None, temperature: float = 1.0, top_p: float = 0.95):  # Added temperature and top_p parameters
         """
         Perform the full RAG pipeline: search and generate a response.
 
@@ -24,12 +25,15 @@ class InsuranceRAG:
             query: The user query.
             stream: Whether to enable streaming responses.
             session_id: Optional session identifier.
+            plan_name_filter: Optional filter for plan names.
+            temperature: Sampling temperature for response generation.
+            top_p: Nucleus sampling parameter for response generation.
 
         Returns:
             Generated response from the RAG pipeline (string or generator if streaming).
         """
         # Step 1: Perform search
-        search_results = self.search.perform_search(query)
+        search_results = self.search.perform_search(query, plan_name_filter=plan_name_filter)
         if not search_results:
             return "No relevant documents found for the query."
 
@@ -58,8 +62,8 @@ class InsuranceRAG:
             stream=stream,  # Use the stream parameter
             system_prompt=system_prompt,  # Pass SYSTEM_PROMPT
             history=list(self.history),  # Pass history as a list
-            temperature=1.0,
-            top_p=0.9
+            temperature=temperature,
+            top_p=top_p
         )
 
         if stream and not isinstance(response, str):

@@ -1,5 +1,5 @@
 import os
-from HEALRAG.search_manager import SearchManager
+from .HEALRAG.search_manager import SearchManager
 from dotenv import load_dotenv
 from typing import Optional
 

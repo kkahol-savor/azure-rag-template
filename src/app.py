@@ -22,7 +22,7 @@ from datetime import datetime
 # Add the src directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from insurance_rag import InsuranceRAG
+from src.insurance_rag import InsuranceRAG
 
 # Load environment variables
 load_dotenv()
@@ -54,6 +54,9 @@ class QueryRequest(BaseModel):
     query: str
     stream: bool = True
     session_id: Optional[str] = None
+    plan_name_filter: Optional[str] = None       # new optional field for plan filtering
+    temperature: Optional[float] = 1.0            # new optional field for temperature
+    top_p: Optional[float] = 0.95                 # new optional field for top_p
 
 class SetupRequest(BaseModel):
     data_dir: Optional[str] = None
@@ -68,6 +71,14 @@ class ConversationResponse(BaseModel):
 # Store active sessions
 active_sessions = {}
 
+# Helper function to remove CosmosDB metadata
+def clean_conversation_record(record: dict) -> dict:
+    cleaned = record.copy()
+    for key in list(cleaned.keys()):
+        if key.startswith("_"):
+            del cleaned[key]
+    return cleaned
+
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     """
@@ -80,6 +91,11 @@ async def root(request: Request):
         Rendered HTML template
     """
     return templates.TemplateResponse("index.html", {"request": request})
+
+# Optional: API-specific endpoint (merged from api.py)
+@app.get("/api")
+async def api_root():
+    return {"message": "Welcome to the Heal Rag API!"}
 
 @app.post("/api/setup")
 async def setup_pipeline(request: SetupRequest):
@@ -120,7 +136,14 @@ async def query(request: QueryRequest):
         
         # Instantiate InsuranceRAG and process the query
         ir = InsuranceRAG()
-        response = ir.perform_rag(request.query, stream=False)
+        response = ir.perform_rag(
+            request.query,
+            stream=False,
+            session_id=session_id,
+            plan_name_filter=request.plan_name_filter,   # pass the filter parameter
+            temperature=request.temperature,             # pass the temperature value
+            top_p=request.top_p                          # pass the top_p value
+        )
         
         # Store the session
         active_sessions[session_id] = {
@@ -154,7 +177,14 @@ async def query_stream(request: QueryRequest):
         
         # Instantiate InsuranceRAG and create a generator for the streaming response
         ir = InsuranceRAG()
-        response_generator = ir.perform_rag(request.query, stream=True)
+        response_generator = ir.perform_rag(
+            request.query,
+            stream=True,
+            session_id=session_id,
+            plan_name_filter=request.plan_name_filter,   # pass the filter parameter
+            temperature=request.temperature,             # pass the temperature value
+            top_p=request.top_p                          # pass the top_p value
+        )
         
         async def stream_generator():
             full_response = ""
@@ -190,7 +220,9 @@ async def get_conversation(session_id: str):
     try:
         # Check if the session is in memory
         if session_id in active_sessions:
-            return active_sessions[session_id]
+            conversation = active_sessions[session_id]
+            conversation = clean_conversation_record(conversation)
+            return conversation
         
         # Return a 404 response with a more descriptive message
         return JSONResponse(
@@ -215,7 +247,9 @@ async def get_conversations(limit: int = 10):
     """
     try:
         # Return recent conversations from active sessions
-        return list(active_sessions.values())[:limit]
+        conversations = list(active_sessions.values())[:limit]
+        conversations = [clean_conversation_record(conv) for conv in conversations]
+        return conversations
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
